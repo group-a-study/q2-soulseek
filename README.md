@@ -10,10 +10,10 @@ A Soulseek client for the **Shanling Q2** running [Q2 Pod](https://github.com/Di
 
 1. Download `q2-soulseek-*.zip` from the [latest release](https://github.com/group-a-study/q2-soulseek/releases/latest).
 2. Power the Q2 off, then put its microSD card in your computer.
-3. Unzip the file to the card's root, so the card has `.soulseek/q2-soulseek`, `.soulseek/run` and `.soulseek/q2app`. The leading dot hides the folder on macOS (Cmd+Shift+. in Finder shows it) and Linux.
+3. Unzip the file to the card's root, so the card has `.soulseek/q2-soulseek`, `.soulseek/run`, `.soulseek/q2app` and its icons `.soulseek/icon.png` and `.soulseek/icon-40.png`. The leading dot hides the folder on macOS (Cmd+Shift+. in Finder shows it) and Linux.
 4. Eject the card, put it back in the Q2 and power it on.
 
-Soulseek then has a row in **Streaming**.
+Soulseek then has a row in **Streaming**, with its logo.
 
 ## Set up
 
@@ -41,7 +41,7 @@ The Q2 stays awake while files move, while downloads wait for a slot (up to 30 m
 
 ## Update and remove
 
-**System settings → Apps** shows **Update** when a newer release is out. By hand, replace `.soulseek/q2-soulseek`, `.soulseek/run` and `.soulseek/q2app`. Either way, `.soulseek/config.json` (your account and settings; it holds the password as typed, as Soulseek clients do), `.soulseek/downloads.json` and `.soulseek/shares.cache` are kept.
+**System settings → Apps** shows **Update** when a newer release is out. By hand, replace `.soulseek/q2-soulseek`, `.soulseek/run`, `.soulseek/q2app`, `.soulseek/icon.png` and `.soulseek/icon-40.png`. Either way, `.soulseek/config.json` (your account and settings; it holds the password as typed, as Soulseek clients do), `.soulseek/downloads.json` and `.soulseek/shares.cache` are kept.
 
 To remove it, press **Soulseek** twice in **System settings → Apps**, or delete `.soulseek` to start over completely. Your downloads in `Soulseek/` stay.
 

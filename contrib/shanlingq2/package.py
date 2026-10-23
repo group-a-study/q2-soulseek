@@ -3,7 +3,8 @@
 
     package.py STAGED_DIR ZIP
 
-STAGED_DIR is OUT/.<app> (the app q2-<app>, its launcher run and its manifest q2app). The app must be
+STAGED_DIR is OUT/.<app> (the app q2-<app>, its launcher run, its manifest q2app and its Streaming
+icons icon.png, 52 px, and icon-40.png). The app must be
 a static MIPS32 little-endian executable with soft-float ABI flags (GOMIPS=softfloat), so the
 firmware's -mfp64 doesn't matter; the Q2's kernel still requires the nan2008 ELF flag, which Go
 doesn't set, so it is set here, as q2-librespot's q2-link sets it for rustc's objects. Each entry is
@@ -52,9 +53,9 @@ def main():
     app = staged/('q2-' + folder.lstrip('.'))
     app.write_bytes(mark_q2(bytearray(app.read_bytes())))
     with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
-        for name in ('q2app', 'run', app.name):  # the app last
+        for name in ('q2app', 'icon.png', 'icon-40.png', 'run', app.name):  # the app last
             info = zipfile.ZipInfo(f'{folder}/{name}', STAMP)
-            info.external_attr = (0o100000 | (0o755 if name != 'q2app' else 0o644)) << 16
+            info.external_attr = (0o100000 | (0o755 if name in ('run', app.name) else 0o644)) << 16
             info.compress_type = zipfile.ZIP_DEFLATED
             z.writestr(info, (staged/name).read_bytes())
     print(out)

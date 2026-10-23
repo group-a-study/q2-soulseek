@@ -27,7 +27,7 @@ import (
 	"github.com/group-a-study/q2-soulseek/internal/slsk"
 )
 
-const version = "q2-v1.0"
+const version = "q2-v1.1"
 
 // settings is .soulseek/config.json: the client's configuration, the phone's key and PIN, and when
 // to stop by itself.

@@ -22,8 +22,8 @@ cd "$ROOT"
 CGO_ENABLED=0 GOOS=linux GOARCH=mipsle GOMIPS=softfloat \
     go build -trimpath -ldflags='-s -w -buildid=' -o "$R/q2-$APP" "./cmd/q2-$APP"
 cp "$HERE/launcher.sh" "$R/run"
-cp "$HERE/q2app" "$R/q2app"
+cp "$HERE/q2app" "$HERE/icon.png" "$HERE/icon-40.png" "$R/"
 chmod 755 "$R/q2-$APP" "$R/run"
-chmod 644 "$R/q2app"
+chmod 644 "$R/q2app" "$R/icon.png" "$R/icon-40.png"
 rm -f "$OUT"/q2-$APP-*.zip
 python3 -I "$HERE/package.py" "$R" "$OUT/q2-$APP-$VERSION-$SHA.zip"

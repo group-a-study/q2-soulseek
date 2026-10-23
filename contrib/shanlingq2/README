@@ -12,6 +12,9 @@ files move. Nothing is flashed for it.
                ELF flag the Q2's kernel requires and Go doesn't, and writes the ZIP
   launcher.sh  installed as .soulseek/run: q2-soulseek copied to /tmp and run there in a restart loop
   q2app        installed as .soulseek/q2app: the card app manifest (name=Soulseek)
+  icon.png, icon-40.png
+               installed beside it: Streaming's row icon, 52 px (Legacy) and 40 px (iPod), Soulseek's
+               bird in white on Soulseek blue, in Q2 Pod's style
   test_launcher.py
                runs launcher.sh on the host with a fake app
 
