@@ -1,0 +1,665 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#14181c">
+<title>Q2 Soulseek</title>
+<style>
+:root {
+  --bg: #f4f5f7; --panel: #ffffff; --panel2: #eef0f3; --line: #dfe2e7; --text: #16191d; --muted: #646b75;
+  --accent: #1f8a70; --accent-ink: #ffffff; --accent-soft: #dff3ec; --warn: #b86e00; --warn-soft: #fff1d6;
+  --bad: #c62f3a; --bad-soft: #fde4e6; --good: #1f8a70; --bar: #d9dde3; --shadow: 0 1px 2px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.05);
+  --radius: 14px; --tabh: 60px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1215; --panel: #171b20; --panel2: #1e242a; --line: #2a3138; --text: #e9edf1; --muted: #98a2ad;
+  --accent: #3cc49f; --accent-ink: #062018; --accent-soft: #143a30; --warn: #f0b04a; --warn-soft: #3a2b10;
+  --bad: #ff6b74; --bad-soft: #3d1a1d; --good: #3cc49f; --bar: #2a3138; --shadow: 0 1px 2px rgba(0,0,0,.4);
+} }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+body { padding-bottom: calc(var(--tabh) + env(safe-area-inset-bottom)); min-height: 100vh; overflow-x: hidden; }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+.hidden { display: none !important; }
+header.top { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px);
+  padding: calc(10px + env(safe-area-inset-top)) 16px 10px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); }
+header.top h1 { font-size: 17px; margin: 0; font-weight: 650; letter-spacing: -.01em; flex: 1; white-space: nowrap; }
+header.top h1 small { color: var(--muted); font-weight: 500; font-size: 13px; margin-left: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--panel2);
+  font-size: 13px; color: var(--muted); white-space: nowrap; border: 1px solid var(--line); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.dot.on { background: var(--good); } .dot.wait { background: var(--warn); } .dot.off { background: var(--bad); }
+main { max-width: 980px; margin: 0 auto; padding: 12px 12px 24px; }
+nav.tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; background: var(--panel);
+  border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
+nav.tabs button { flex: 1; height: var(--tabh); border: 0; background: none; color: var(--muted); display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 3px; font-size: 12px; font-weight: 600; position: relative; }
+nav.tabs button svg { width: 24px; height: 24px; }
+nav.tabs button[aria-selected="true"] { color: var(--accent); }
+.badge { position: absolute; top: 7px; left: calc(50% + 6px); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+  background: var(--accent); color: var(--accent-ink); font-size: 11px; line-height: 18px; text-align: center; }
+@media (min-width: 760px) {
+  body { padding-bottom: 0; }
+  nav.tabs { position: sticky; top: 57px; bottom: auto; border: 0; border-bottom: 1px solid var(--line); background: var(--bg); justify-content: center; }
+  nav.tabs button { flex: 0 0 auto; flex-direction: row; height: 46px; padding: 0 18px; font-size: 14px; }
+  nav.tabs button svg { width: 20px; height: 20px; }
+  nav.tabs button[aria-selected="true"] { box-shadow: inset 0 -2px 0 var(--accent); }
+  .badge { position: static; margin-left: 4px; }
+}
+.card { background: var(--panel); border-radius: var(--radius); box-shadow: var(--shadow); border: 1px solid var(--line); margin: 0 0 12px; }
+.card > .head { padding: 12px 14px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); }
+.card > .head h2 { font-size: 15px; margin: 0; flex: 1; font-weight: 650; }
+.card .body { padding: 12px 14px; }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.btn { border: 1px solid var(--line); background: var(--panel2); border-radius: 10px; padding: 8px 14px; font-weight: 600; min-height: 40px; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.danger { color: var(--bad); }
+.btn.slim { min-height: 32px; padding: 4px 10px; font-size: 13px; border-radius: 8px; }
+.btn:disabled { opacity: .5; }
+.row { display: flex; align-items: center; gap: 8px; }
+.field { display: block; margin: 0 0 12px; }
+.field > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 5px; font-weight: 600; }
+input[type=text], input[type=password], input[type=number], input[type=search], select {
+  width: 100%; border: 1px solid var(--line); background: var(--panel2); border-radius: 10px; padding: 10px 12px; min-height: 44px; outline: none; }
+input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.searchbar { display: flex; gap: 8px; margin-bottom: 10px; }
+.searchbar input { flex: 1; font-size: 16px; }
+.chips { display: flex; gap: 6px; overflow-x: auto; padding: 2px 0 10px; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.schip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--panel); border-radius: 999px;
+  padding: 6px 6px 6px 12px; font-size: 14px; white-space: nowrap; }
+.schip[aria-current="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.schip .n { color: var(--muted); font-size: 12px; }
+.schip .x { border: 0; background: none; width: 24px; height: 24px; border-radius: 50%; color: var(--muted); }
+.filters { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 10px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); margin-bottom: 10px; }
+.filters .wide { grid-column: 1 / -1; }
+.filters input, .filters select { min-height: 38px; padding: 6px 10px; }
+@media (min-width: 760px) { .filters { grid-template-columns: repeat(6, 1fr); } .filters .wide { grid-column: span 2; } }
+.toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; }
+.toggle input { width: 20px; height: 20px; accent-color: var(--accent); }
+.summary { display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: var(--muted); margin: 4px 2px 8px; gap: 8px; }
+.ugroup { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: 10px; overflow: hidden; box-shadow: var(--shadow); }
+.uhead { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--panel2); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.uhead .name { font-weight: 700; }
+.pill { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.pill.free { color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, transparent); }
+.pill.q { color: var(--warn); }
+.folder { border-top: 1px solid var(--line); }
+.folder:first-of-type { border-top: 0; }
+.fhead { display: flex; align-items: center; gap: 8px; padding: 9px 12px; }
+.fhead .path { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.fhead .path b { color: var(--text); font-weight: 650; }
+.file { display: grid; grid-template-columns: 28px 1fr auto; gap: 4px 10px; align-items: center; padding: 8px 12px; border-top: 1px dashed var(--line); cursor: pointer; }
+.file:active { background: var(--panel2); }
+.file input { width: 20px; height: 20px; accent-color: var(--accent); margin: 0; }
+.file .fn { min-width: 0; overflow-wrap: anywhere; font-size: 14px; }
+.file .meta { grid-column: 2 / 4; display: flex; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.file .sz { font-size: 13px; color: var(--muted); white-space: nowrap; }
+.q { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 5px; background: var(--panel2); border: 1px solid var(--line); color: var(--muted); }
+.q.lossless { color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, transparent); }
+.empty { text-align: center; padding: 40px 16px; color: var(--muted); }
+.empty svg { width: 44px; height: 44px; opacity: .5; display: block; margin: 0 auto 10px; }
+.actionbar { position: fixed; left: 12px; right: 12px; bottom: calc(var(--tabh) + 10px + env(safe-area-inset-bottom)); z-index: 25; display: flex; gap: 8px;
+  align-items: center; background: var(--text); color: var(--bg); padding: 8px 8px 8px 16px; border-radius: 14px; box-shadow: 0 8px 30px rgba(0,0,0,.3); max-width: 720px; margin: 0 auto; }
+.actionbar span { flex: 1; font-weight: 600; }
+.actionbar .btn { background: var(--accent); color: var(--accent-ink); border: 0; }
+.actionbar .btn.ghost { background: transparent; color: var(--bg); }
+@media (min-width: 760px) { .actionbar { bottom: 16px; } }
+.seg { display: flex; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 2px; overflow-x: auto; }
+.seg button { flex: 1; border: 0; background: none; border-radius: 8px; padding: 7px 10px; font-size: 13px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.seg button[aria-pressed="true"] { background: var(--panel); color: var(--text); box-shadow: var(--shadow); }
+.tgroup .thead { display: flex; gap: 8px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.tgroup .thead .t { flex: 1; min-width: 0; }
+.tgroup .thead .t b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tgroup .thead .t small { color: var(--muted); }
+.tr { padding: 10px 12px; border-top: 1px solid var(--line); cursor: pointer; }
+.tr:first-child { border-top: 0; }
+.tr .l1 { display: flex; gap: 8px; align-items: baseline; }
+.tr .l1 .n { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 14px; }
+.tr .l1 .s { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.tr .l2 { display: flex; gap: 8px; font-size: 12px; color: var(--muted); margin-top: 6px; align-items: center; }
+.tr .l2 .st { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st.Failed { color: var(--bad); } .st.Finished { color: var(--good); } .st.Downloading, .st.Uploading { color: var(--accent); }
+.progress { height: 5px; background: var(--bar); border-radius: 3px; overflow: hidden; margin-top: 7px; }
+.progress i { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width .4s; }
+.progress.done i { background: var(--good); } .progress.fail i { background: var(--bad); }
+.banner { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: var(--radius); margin-bottom: 12px; border: 1px solid var(--line); background: var(--panel); }
+.banner.ok { background: var(--accent-soft); border-color: transparent; }
+.banner.warn { background: var(--warn-soft); border-color: transparent; }
+.banner.bad { background: var(--bad-soft); border-color: transparent; }
+.banner svg { flex: none; width: 22px; height: 22px; margin-top: 1px; }
+.banner b { display: block; }
+.radio { display: flex; gap: 12px; align-items: flex-start; padding: 12px; border: 1px solid var(--line); border-radius: 12px; margin-bottom: 8px; cursor: pointer; }
+.radio input { width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--accent); flex: none; }
+.radio:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.radio b { display: block; }
+.checks { display: grid; gap: 6px; }
+.checks label { display: flex; gap: 10px; align-items: center; padding: 9px 10px; border-radius: 10px; background: var(--panel2); }
+.checks input { width: 20px; height: 20px; accent-color: var(--accent); }
+.stepper { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.stepper button { width: 40px; height: 40px; border: 0; background: var(--panel2); font-size: 18px; }
+.stepper span { min-width: 44px; text-align: center; font-weight: 700; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 14px; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+.sheet-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 50; display: flex; align-items: flex-end; justify-content: center; }
+.sheet { background: var(--panel); width: 100%; max-width: 520px; border-radius: 18px 18px 0 0; padding: 8px 8px calc(12px + env(safe-area-inset-bottom)); }
+@media (min-width: 760px) { .sheet-bg { align-items: center; } .sheet { border-radius: 18px; } }
+.sheet h3 { margin: 10px 12px 2px; font-size: 15px; overflow-wrap: anywhere; }
+.sheet p { margin: 0 12px 10px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.sheet button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 14px 12px; border-radius: 10px; font-size: 16px; font-weight: 550; }
+.sheet button:active { background: var(--panel2); }
+.sheet button.danger { color: var(--bad); }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--tabh) + 76px + env(safe-area-inset-bottom)); z-index: 60;
+  background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 12px; font-size: 14px; font-weight: 600; box-shadow: 0 6px 24px rgba(0,0,0,.3); max-width: calc(100% - 32px); }
+.center { min-height: 70vh; display: flex; align-items: center; justify-content: center; }
+.gate { width: 100%; max-width: 380px; text-align: center; }
+.gate h2 { margin: 6px 0 6px; font-size: 22px; }
+.gate .logo { width: 64px; height: 64px; border-radius: 18px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; margin: 0 auto 12px; }
+.gate .logo svg { width: 36px; height: 36px; }
+.pin { font-size: 28px; letter-spacing: .4em; text-align: center; font-weight: 700; padding-left: .4em !important; }
+.err { color: var(--bad); font-size: 14px; min-height: 20px; margin: 8px 0; }
+.foot { text-align: center; color: var(--muted); font-size: 12px; margin: 20px 0 8px; }
+.morebtn { display: block; margin: 8px auto 20px; }
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>Soulseek <small>on Q2</small></h1>
+  <span class="chip hidden" id="power" title="Power"></span>
+  <span class="chip" id="conn"><span class="dot"></span><span>Connecting…</span></span>
+</header>
+
+<nav class="tabs" role="tablist" id="tabs">
+  <button role="tab" data-tab="search" aria-selected="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Search</button>
+  <button role="tab" data-tab="downloads">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0 4.5-4.5M12 15l-4.5-4.5"/><path d="M5 19h14"/></svg>Downloads<span class="badge hidden" id="dlbadge"></span></button>
+  <button role="tab" data-tab="uploads">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V8m0 0 4.5 4.5M12 8l-4.5 4.5"/><path d="M5 4h14"/></svg>Uploads<span class="badge hidden" id="upbadge"></span></button>
+  <button role="tab" data-tab="settings">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Settings</button>
+</nav>
+
+<main id="main">
+  <section id="v-gate" class="center hidden"></section>
+
+  <section id="v-search" data-view="search">
+    <form class="searchbar" id="searchform" autocomplete="off">
+      <input type="search" id="q" placeholder="Artist, album or song" enterkeyhint="search" aria-label="Search Soulseek">
+      <button class="btn primary" type="submit">Search</button>
+    </form>
+    <div class="chips" id="searchchips"></div>
+    <div id="filterwrap" class="hidden">
+      <div class="summary">
+        <span id="rsummary"></span>
+        <button class="btn slim" id="filtertoggle" type="button" aria-expanded="false">Filters</button>
+      </div>
+      <div class="filters hidden" id="filters">
+        <input class="wide" type="text" id="f-in" placeholder="Include words">
+        <input class="wide" type="text" id="f-out" placeholder="Exclude words">
+        <select id="f-type" aria-label="File type">
+          <option value="">Any type</option><option value="lossless">Lossless</option><option value="flac">FLAC</option>
+          <option value="mp3">MP3</option><option value="lossy">Lossy</option><option value="audio">Audio only</option>
+        </select>
+        <select id="f-br" aria-label="Minimum bitrate">
+          <option value="0">Any bitrate</option><option value="192">192+ kbps</option><option value="256">256+ kbps</option><option value="320">320+ kbps</option>
+        </select>
+        <select id="f-sort" aria-label="Sort">
+          <option value="best">Best first</option><option value="speed">Fastest</option><option value="queue">Shortest queue</option><option value="size">Largest</option>
+        </select>
+        <label class="toggle"><input type="checkbox" id="f-free"> Free slot</label>
+      </div>
+    </div>
+    <div id="results"></div>
+  </section>
+
+  <section id="v-downloads" data-view="downloads" class="hidden">
+    <div class="row" style="margin-bottom:10px">
+      <div class="seg" id="dlfilter" style="flex:1">
+        <button data-f="all" aria-pressed="true">All</button><button data-f="active">Active</button>
+        <button data-f="queued">Waiting</button><button data-f="finished">Finished</button><button data-f="failed">Failed</button>
+      </div>
+    </div>
+    <div id="dlnote" class="small muted" style="margin:0 2px 10px"></div>
+    <div id="downloads"></div>
+  </section>
+
+  <section id="v-uploads" data-view="uploads" class="hidden">
+    <div id="sharebanner"></div>
+    <div id="uploads"></div>
+  </section>
+
+  <section id="v-settings" data-view="settings" class="hidden">
+    <div class="card"><div class="head"><h2>Account</h2><span id="acctstate" class="small muted"></span></div>
+      <div class="body">
+        <form id="acctform" autocomplete="off">
+          <label class="field"><span>Username</span><input type="text" id="a-user" autocapitalize="off" spellcheck="false" maxlength="30" required></label>
+          <label class="field"><span>Password</span><input type="password" id="a-pass" placeholder="Unchanged"></label>
+          <p class="small muted" style="margin:0 0 12px">A new name becomes a new Soulseek account the first time it signs in. There's no password reset, so keep it safe.</p>
+          <div class="row"><button class="btn primary" type="submit">Save and connect</button><button class="btn" type="button" id="reconnect">Reconnect</button></div>
+        </form>
+      </div></div>
+
+    <div class="card"><div class="head"><h2>Sharing</h2><span id="sharestat" class="small muted"></span></div>
+      <div class="body">
+        <label class="radio"><input type="radio" name="share" value="off"><span><b>Off</b><span class="small muted">Download only. Nothing is shared.</span></span></label>
+        <label class="radio"><input type="radio" name="share" value="charging"><span><b>Only while charging</b><span class="small muted">Shares while a cable powers the Q2; stops the moment it's unplugged. Recommended.</span></span></label>
+        <label class="radio"><input type="radio" name="share" value="battery"><span><b>While charging, or on battery above <span id="bmlabel">80</span>%</b><span class="small muted">Stops when the battery drops below the level.</span>
+          <input type="range" id="s-bmin" min="30" max="95" step="5" value="80" style="width:100%;margin-top:8px;accent-color:var(--accent)"></span></label>
+        <div id="sharedetails">
+          <div class="field" style="margin-top:14px"><span>Shared folders</span><div class="checks" id="s-folders"></div></div>
+          <div class="row" style="justify-content:space-between;margin-bottom:12px"><span>Upload slots</span>
+            <span class="stepper"><button type="button" data-step="-1" aria-label="Fewer">−</button><span id="s-slots">2</span><button type="button" data-step="1" aria-label="More">+</button></span></div>
+          <label class="field"><span>Upload speed limit</span>
+            <select id="s-kbps"><option value="0">No limit</option><option value="128">128 KB/s</option><option value="256">256 KB/s</option><option value="512">512 KB/s</option><option value="1024">1 MB/s</option><option value="2048">2 MB/s</option></select></label>
+          <button class="btn" type="button" id="rescan">Rescan shared folders</button>
+        </div>
+      </div></div>
+
+    <div class="card"><div class="head"><h2>Downloads</h2></div>
+      <div class="body">
+        <label class="field"><span>Save to</span><input type="text" id="s-dldir" autocapitalize="off" spellcheck="false"></label>
+        <p class="small muted" style="margin:0">A folder on the card. Each download goes in a folder named after its album folder. Run <b>Library → Update Local Music</b> on the Q2 to play them.</p>
+      </div></div>
+
+    <div class="card"><div class="head"><h2>On the Q2</h2></div>
+      <div class="body">
+        <label class="field"><span>On battery, stop Soulseek when idle for</span>
+          <select id="s-idle"><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option><option value="0">Never</option></select></label>
+        <p class="small muted" style="margin:0 0 12px">The Q2 stays awake while files move, and while downloads wait (up to 30 minutes on battery). Start Soulseek again from <b>Streaming → Soulseek</b>.</p>
+        <dl class="kv" style="margin:0 0 12px"><dt>Phone page PIN</dt><dd id="s-pin"></dd><dt>Address</dt><dd id="s-addr"></dd></dl>
+        <div class="row" style="flex-wrap:wrap"><button class="btn" type="button" id="resetaccess">Sign out all phones</button><button class="btn danger" type="button" id="stop">Stop Soulseek</button></div>
+      </div></div>
+
+    <div class="card"><div class="head"><h2>Advanced</h2></div>
+      <div class="body">
+        <label class="field"><span>Listening port</span><input type="number" id="s-port" min="1024" max="65535" inputmode="numeric"></label>
+        <p class="small muted" style="margin:-6px 0 12px">Forwarding it on your router lets more users reach you, for more results.</p>
+        <label class="field"><span>Results we send per search</span><input type="number" id="s-maxres" min="10" max="500" inputmode="numeric"></label>
+        <button class="btn" type="button" id="saveadv">Save</button>
+      </div></div>
+    <div class="foot" id="version"></div>
+  </section>
+</main>
+
+<div class="actionbar hidden" id="actionbar"><span id="selcount"></span>
+  <button class="btn ghost" id="selclear" type="button">Clear</button>
+  <button class="btn" id="seldl" type="button">Download</button></div>
+
+<script>
+"use strict";
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmtSize = n => n >= 1073741824 ? (n / 1073741824).toFixed(1) + " GB" : n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : n >= 1024 ? Math.round(n / 1024) + " KB" : n + " B";
+const fmtSpeed = n => n > 0 ? fmtSize(Math.round(n)) + "/s" : "";
+const fmtDur = s => { if (!s) return ""; const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, x = String(s % 60).padStart(2, "0"); return h ? `${h}:${String(m).padStart(2,"0")}:${x}` : `${m}:${x}`; };
+const LOSSLESS = new Set(["flac","wav","aiff","aif","ape","wv","alac","dsf"]);
+const AUDIO = new Set([...LOSSLESS, "mp3","m4a","ogg","opus","aac","wma"]);
+const ICON_EMPTY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>';
+const ICON_DOWN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0 4.5-4.5M12 15l-4.5-4.5"/><path d="M5 19h14"/></svg>';
+const ICON_UP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V8m0 0 4.5 4.5M12 8l-4.5 4.5"/><path d="M5 4h14"/></svg>';
+const ICON_INFO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>';
+const ICON_BOLT = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>';
+
+const S = { v: -1, snap: null, tab: localStorage.getItem("tab") || "search", current: null, results: {}, sel: new Set(),
+  filters: { in: "", out: "", type: "", br: 0, sort: "best", free: false }, dlf: "all", shown: 40, authed: true, editing: false };
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json", "X-Q2": "1" }, body: JSON.stringify(body) };
+  const r = await fetch("/api/" + path, opt);
+  if (r.status === 401) { S.authed = false; showGate(); throw new Error("Sign in"); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+let toastTimer;
+function toast(msg) {
+  let t = $("#toast");
+  if (!t) { t = document.createElement("div"); t.id = "toast"; t.className = "toast"; t.setAttribute("role", "status"); document.body.append(t); }
+  t.textContent = msg; t.classList.remove("hidden");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add("hidden"), 2600);
+}
+
+function sheet(title, sub, actions) {
+  const bg = document.createElement("div"); bg.className = "sheet-bg";
+  bg.innerHTML = `<div class="sheet" role="dialog" aria-modal="true"><h3>${esc(title)}</h3>${sub ? `<p>${esc(sub)}</p>` : ""}</div>`;
+  const sh = $(".sheet", bg);
+  for (const [label, fn, cls] of [...actions, ["Cancel", null, ""]]) {
+    const b = document.createElement("button"); b.textContent = label; if (cls) b.className = cls;
+    b.onclick = () => { bg.remove(); if (fn) fn(); }; sh.append(b);
+  }
+  bg.onclick = e => { if (e.target === bg) bg.remove(); };
+  document.body.append(bg);
+}
+
+// ---- Sign-in gate: the PIN shown on the Q2's Soulseek page ----
+function showGate() {
+  setConn("wait", "Signed out"); $("#power").classList.add("hidden"); $("#actionbar").classList.add("hidden");
+  $$("section[data-view]").forEach(s => s.classList.add("hidden"));
+  $("#tabs").classList.add("hidden");
+  const g = $("#v-gate"); g.classList.remove("hidden");
+  g.innerHTML = `<form class="gate" id="pinform"><div class="logo">${ICON_BOLT.replace('width="14" height="14"', "")}</div>
+    <h2>Soulseek on Q2</h2><p class="muted">Enter the PIN shown on the Q2 under <b>Streaming → Soulseek → Phone Remote</b>, or scan its QR code.</p>
+    <input class="pin" id="pin" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="••••••" aria-label="PIN">
+    <div class="err" id="pinerr"></div><button class="btn primary" style="width:100%">Continue</button></form>`;
+  $("#pinform").onsubmit = async e => {
+    e.preventDefault();
+    try {
+      const r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json", "X-Q2": "1" }, body: JSON.stringify({ pin: $("#pin").value }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || "Try again");
+      S.authed = true; g.classList.add("hidden"); $("#tabs").classList.remove("hidden"); setTab(S.tab); S.v = -1; poll();
+    } catch (err) { $("#pinerr").textContent = err.message; }
+  };
+  setTimeout(() => $("#pin")?.focus(), 50);
+}
+
+// ---- Tabs ----
+function setTab(t) {
+  S.tab = t; localStorage.setItem("tab", t);
+  $$("#tabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === t));
+  $$("section[data-view]").forEach(s => s.classList.toggle("hidden", s.dataset.view !== t));
+  $("#actionbar").classList.toggle("hidden", t !== "search" || S.sel.size === 0);
+  render();
+}
+$$("#tabs button").forEach(b => b.onclick = () => setTab(b.dataset.tab));
+
+// ---- State, by long poll: the server answers once something changed ----
+async function poll() {
+  while (S.authed) {
+    try {
+      const snap = await api("state?since=" + S.v);
+      S.v = snap.v; S.snap = snap; await syncResults(); render();
+    } catch (e) {
+      if (!S.authed) return;
+      setConn("off", "Q2 unreachable");
+      await new Promise(r => setTimeout(r, 3000));
+    }
+  }
+}
+
+function setConn(cls, text) { const c = $("#conn"); $(".dot", c).className = "dot " + cls; $("span:last-child", c).textContent = text; }
+
+async function syncResults() {
+  const list = S.snap.searches || [];
+  for (const id of Object.keys(S.results)) if (!list.some(s => String(s.id) === id)) delete S.results[id];
+  if (S.current == null && list.length) S.current = list[0].id;
+  if (S.current != null && !list.some(s => s.id === S.current)) S.current = list.length ? list[0].id : null;
+  const s = list.find(s => s.id === S.current);
+  if (!s) return;
+  const have = S.results[s.id] || (S.results[s.id] = []);
+  if (s.results > have.length) {
+    try { const r = await api(`search?id=${s.id}&from=${have.length}`); have.push(...r.results); } catch (e) {}
+  }
+}
+
+// ---- Rendering ----
+let renderQueued = false;
+function render() {
+  if (renderQueued) return; renderQueued = true;
+  requestAnimationFrame(() => { renderQueued = false; draw(); });
+}
+
+function draw() {
+  const snap = S.snap; if (!snap) return;
+  const st = snap.status;
+  const states = { online: ["on", "Online as " + st.username], connecting: ["wait", "Connecting…"], offline: ["off", "Offline"],
+    refused: ["off", "Sign-in refused"], elsewhere: ["off", "Signed in elsewhere"], setup: ["wait", "Set up your account"], stopped: ["off", "Stopped"] };
+  setConn(...(states[st.state] || ["off", st.state]));
+  const p = $("#power");
+  if (st.battery >= 0) { p.classList.remove("hidden"); p.innerHTML = (st.external_power ? ICON_BOLT : "") + `<span>${st.battery}%</span>`; p.title = st.external_power ? "On the cable" : "On battery"; }
+  const dl = st.downloading + st.queued, up = st.uploading;
+  $("#dlbadge").textContent = dl; $("#dlbadge").classList.toggle("hidden", !dl);
+  $("#upbadge").textContent = up; $("#upbadge").classList.toggle("hidden", !up);
+  if (st.state === "setup" && S.tab !== "settings") { S.tab = "settings"; setTab("settings"); return; }
+  if (S.tab === "search") drawSearch(); else if (S.tab === "downloads") drawDownloads(); else if (S.tab === "uploads") drawUploads(); else drawSettings();
+}
+
+function quality(r) {
+  const ext = (r.ext || "").toUpperCase();
+  if (r.depth && r.rate) return `${ext} ${r.depth}/${(r.rate / 1000).toFixed(1).replace(/\.0$/, "")}`;
+  if (r.bitrate) return `${ext} ${r.vbr ? "V" : ""}${r.bitrate}`;
+  return ext;
+}
+
+function passes(r, f, inc, exc) {
+  const hay = (r.folder + "\\" + r.name).toLowerCase();
+  if (inc.length && !inc.every(w => hay.includes(w))) return false;
+  if (exc.some(w => hay.includes(w))) return false;
+  const e = r.ext;
+  if (f.type === "lossless" && !LOSSLESS.has(e)) return false;
+  if (f.type === "lossy" && (LOSSLESS.has(e) || !AUDIO.has(e))) return false;
+  if (f.type === "audio" && !AUDIO.has(e)) return false;
+  if ((f.type === "flac" || f.type === "mp3") && e !== f.type) return false;
+  if (f.br && !(LOSSLESS.has(e) || (r.bitrate || 0) >= f.br)) return false;
+  if (f.free && !r.free) return false;
+  return true;
+}
+
+function drawSearch() {
+  const snap = S.snap, list = snap.searches || [];
+  $("#searchchips").innerHTML = list.map(s => `<span class="schip" aria-current="${s.id === S.current}" data-id="${s.id}">
+    <span>${esc(s.query)}</span><span class="n">${s.results}</span><button class="x" data-close="${s.id}" aria-label="Close search">✕</button></span>`).join("");
+  const box = $("#results");
+  const s = list.find(x => x.id === S.current);
+  $("#filterwrap").classList.toggle("hidden", !s);
+  if (!s) {
+    const offline = snap.status.state !== "online";
+    box.innerHTML = `<div class="empty">${ICON_EMPTY}${offline ? "Soulseek isn't connected yet." : "Search millions of shared files.<br>Results are grouped by user and folder, like Nicotine+."}</div>`;
+    return;
+  }
+  const f = S.filters, inc = f.in.toLowerCase().split(/\s+/).filter(Boolean), exc = f.out.toLowerCase().split(/\s+/).filter(Boolean);
+  const all = S.results[s.id] || [];
+  const users = new Map();
+  let shownFiles = 0;
+  for (const r of all) {
+    if (!passes(r, f, inc, exc)) continue;
+    shownFiles++;
+    let u = users.get(r.user);
+    if (!u) users.set(r.user, u = { user: r.user, free: r.free, speed: r.speed, queue: r.queue, folders: new Map(), n: 0, size: 0 });
+    let fo = u.folders.get(r.folder);
+    if (!fo) u.folders.set(r.folder, fo = []);
+    fo.push(r); u.n++; u.size += r.size;
+  }
+  const age = Date.now() / 1000 - s.started;
+  $("#rsummary").textContent = `${shownFiles} of ${all.length} files from ${users.size} of ${s.users} users${age < 60 ? " · still searching…" : ""}`;
+  const groups = [...users.values()];
+  const by = { best: (a, b) => (b.free - a.free) || (b.speed - a.speed), speed: (a, b) => b.speed - a.speed, queue: (a, b) => a.queue - b.queue || b.speed - a.speed, size: (a, b) => b.size - a.size };
+  groups.sort(by[f.sort] || by.best);
+  if (!groups.length) {
+    box.innerHTML = `<div class="empty">${ICON_EMPTY}${all.length ? "No results match the filters." : age < 60 ? "Searching… results arrive over the next minute." : "Nothing found. Try fewer or other words."}</div>`;
+    return;
+  }
+  const html = [];
+  for (const u of groups.slice(0, S.shown)) {
+    html.push(`<div class="ugroup"><div class="uhead"><span class="name">${esc(u.user)}</span>
+      ${u.free ? '<span class="pill free">Free slot</span>' : `<span class="pill q">Queue ${u.queue}</span>`}
+      ${u.speed ? `<span class="pill">${fmtSpeed(u.speed)}</span>` : ""}<span class="pill">${u.n} file${u.n > 1 ? "s" : ""}</span></div>`);
+    for (const [folder, files] of u.folders) {
+      const parts = folder.split("\\"), last = parts.pop();
+      html.push(`<div class="folder"><div class="fhead"><span class="path">${esc(parts.slice(-2).join(" › "))}${parts.length ? " › " : ""}<b>${esc(last)}</b></span>
+        <button class="btn slim" data-folder="${files[0].n}">Download folder</button></div>`);
+      files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+      for (const r of files) {
+        const q = quality(r), ll = LOSSLESS.has(r.ext);
+        html.push(`<div class="file" data-n="${r.n}"><input type="checkbox" ${S.sel.has(r.n) ? "checked" : ""} aria-label="Select ${esc(r.name)}" tabindex="-1">
+          <span class="fn">${esc(r.name)}</span><span class="sz">${fmtSize(r.size)}</span>
+          <span class="meta">${q ? `<span class="q ${ll ? "lossless" : ""}">${esc(q)}</span>` : ""}${r.duration ? `<span>${fmtDur(r.duration)}</span>` : ""}${r.private ? "<span>private</span>" : ""}</span></div>`);
+      }
+      html.push(`</div>`);
+    }
+    html.push(`</div>`);
+  }
+  if (groups.length > S.shown) html.push(`<button class="btn morebtn" id="moreusers">Show ${Math.min(40, groups.length - S.shown)} more users</button>`);
+  box.innerHTML = html.join("");
+  updateActionbar();
+}
+
+function updateActionbar() {
+  const n = S.sel.size;
+  $("#actionbar").classList.toggle("hidden", S.tab !== "search" || !n);
+  $("#selcount").textContent = `${n} file${n === 1 ? "" : "s"} selected`;
+}
+
+$("#searchform").onsubmit = async e => {
+  e.preventDefault();
+  const q = $("#q").value.trim(); if (!q) return;
+  try { const r = await api("search", { query: q }); S.current = r.id; S.sel.clear(); S.shown = 40; $("#q").blur(); toast("Searching for “" + q + "”"); }
+  catch (err) { toast(err.message); }
+};
+$("#searchchips").onclick = async e => {
+  const x = e.target.closest("[data-close]");
+  if (x) { const id = +x.dataset.close; await api("search/close", { id }).catch(() => {}); if (S.current === id) S.current = null; return; }
+  const c = e.target.closest(".schip"); if (c) { S.current = +c.dataset.id; S.sel.clear(); S.shown = 40; await syncResults(); render(); }
+};
+$("#results").onclick = async e => {
+  const fb = e.target.closest("[data-folder]");
+  if (fb) { try { await api("download/folder", { search: S.current, n: +fb.dataset.folder }); toast("Downloading the whole folder"); } catch (err) { toast(err.message); } return; }
+  if (e.target.id === "moreusers") { S.shown += 40; render(); return; }
+  const row = e.target.closest(".file"); if (!row) return;
+  const n = +row.dataset.n;
+  S.sel.has(n) ? S.sel.delete(n) : S.sel.add(n);
+  $("input", row).checked = S.sel.has(n); updateActionbar();
+};
+$("#selclear").onclick = () => { S.sel.clear(); render(); };
+$("#seldl").onclick = async () => {
+  try { const r = await api("download", { search: S.current, n: [...S.sel] }); toast(`${r.queued} file${r.queued === 1 ? "" : "s"} added to Downloads`); S.sel.clear(); render(); }
+  catch (err) { toast(err.message); }
+};
+$("#filtertoggle").onclick = () => { const f = $("#filters"); f.classList.toggle("hidden"); $("#filtertoggle").setAttribute("aria-expanded", !f.classList.contains("hidden")); };
+for (const [id, key, num] of [["#f-in", "in"], ["#f-out", "out"], ["#f-type", "type"], ["#f-br", "br", 1], ["#f-sort", "sort"]])
+  $(id).addEventListener("input", e => { S.filters[key] = num ? +e.target.value : e.target.value; render(); });
+$("#f-free").onchange = e => { S.filters.free = e.target.checked; render(); };
+
+// ---- Transfers ----
+const ACTIVE = new Set(["Downloading", "Uploading", "Starting", "Requesting"]);
+function tState(t) {
+  if (t.state === "In queue") return t.place ? `In ${t.user}'s queue · #${t.place}` : `In ${t.user}'s queue`;
+  if (t.error && (t.state === "Failed" || t.state === "Queued")) return `${t.state}: ${t.error}`;
+  if (t.state === "Downloading" || t.state === "Uploading") {
+    const left = t.speed > 0 ? Math.round((t.size - t.bytes) / t.speed) : 0;
+    return `${Math.floor(t.bytes * 100 / Math.max(t.size, 1))}% · ${fmtSpeed(t.speed)}${left ? " · " + fmtDur(left) + " left" : ""}`;
+  }
+  return t.state;
+}
+function transferList(list, up) {
+  if (!list.length) return "";
+  const groups = new Map();
+  for (const t of list) { const k = t.user + "\u0000" + t.folder; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(t); }
+  const html = [];
+  for (const [k, items] of groups) {
+    const [user, folder] = k.split("\u0000"), name = folder.split("\\").pop() || folder;
+    const done = items.filter(t => t.state === "Finished").length, bytes = items.reduce((a, t) => a + t.bytes, 0), size = items.reduce((a, t) => a + t.size, 0);
+    html.push(`<div class="card tgroup"><div class="thead"><span class="t"><b>${esc(name)}</b><small>${esc(user)} · ${done}/${items.length} · ${fmtSize(size)}</small></span>
+      ${up ? "" : `<button class="btn slim" data-group="${esc(items.map(t => t.id).join(","))}" aria-label="Folder actions">•••</button>`}</div>
+      ${size ? `<div style="padding:0 12px"><div class="progress ${done === items.length ? "done" : ""}"><i style="width:${Math.min(100, bytes * 100 / size).toFixed(1)}%"></i></div></div>` : ""}<div>`);
+    for (const t of items) {
+      const pct = t.size ? Math.min(100, t.bytes * 100 / t.size) : (t.state === "Finished" ? 100 : 0);
+      html.push(`<div class="tr" data-id="${t.id}"><div class="l1"><span class="n">${esc(t.name)}</span><span class="s">${fmtSize(t.size)}</span></div>
+        <div class="l2"><span class="st ${esc(t.state)}">${esc(tState(t))}</span></div>
+        ${ACTIVE.has(t.state) || t.state === "Paused" ? `<div class="progress"><i style="width:${pct.toFixed(1)}%"></i></div>` : ""}</div>`);
+    }
+    html.push(`</div></div>`);
+  }
+  return html.join("");
+}
+const DLF = { all: () => true, active: t => ACTIVE.has(t.state), queued: t => ["Queued", "In queue", "Paused"].includes(t.state), finished: t => t.state === "Finished", failed: t => t.state === "Failed" };
+function drawDownloads() {
+  const list = (S.snap.downloads || []).filter(DLF[S.dlf]);
+  const st = S.snap.status;
+  $("#dlnote").innerHTML = st.finished ? `Finished files are in <b>${esc(S.snap.settings.download_dir)}</b> on the card. On the Q2, run <b>Library → Update Local Music</b> to play them.` +
+    ` <button class="btn slim" id="clearfin" style="margin-left:6px">Clear finished</button>` : "";
+  $("#downloads").innerHTML = transferList(list, false) || `<div class="empty">${ICON_DOWN}${S.dlf === "all" ? "No downloads yet. Search, then pick files or a whole folder." : "Nothing here."}</div>`;
+}
+$("#dlfilter").onclick = e => { const b = e.target.closest("button"); if (!b) return; S.dlf = b.dataset.f; $$("#dlfilter button").forEach(x => x.setAttribute("aria-pressed", x === b)); render(); };
+async function act(id, action) { try { await api("transfer", { id, action }); } catch (err) { toast(err.message); } }
+$("#downloads").onclick = e => {
+  if (e.target.id === "clearfin") { api("clear", { which: "finished" }).catch(err => toast(err.message)); return; }
+  const g = e.target.closest("[data-group]");
+  if (g) {
+    const ids = g.dataset.group.split(",").map(Number), items = S.snap.downloads.filter(t => ids.includes(t.id));
+    const opts = [];
+    if (items.some(t => t.state === "Failed")) opts.push(["Retry failed", () => items.filter(t => t.state === "Failed").forEach(t => act(t.id, "retry"))]);
+    if (items.some(t => t.state === "Paused")) opts.push(["Resume all", () => items.filter(t => t.state === "Paused").forEach(t => act(t.id, "resume"))]);
+    if (items.some(t => !["Paused", "Finished", "Failed"].includes(t.state))) opts.push(["Pause all", () => items.filter(t => !["Paused", "Finished", "Failed"].includes(t.state)).forEach(t => act(t.id, "pause"))]);
+    opts.push(["Remove from list", () => items.forEach(t => act(t.id, "remove")), "danger"]);
+    sheet(items[0].folder.split("\\").pop() || "Folder", `${items.length} files from ${items[0].user}`, opts); return;
+  }
+  const row = e.target.closest(".tr"); if (!row) return;
+  const t = S.snap.downloads.find(x => x.id === +row.dataset.id); if (!t) return;
+  const opts = [];
+  if (t.state === "Paused") opts.push(["Resume", () => act(t.id, "resume")]);
+  else if (t.state === "Failed") opts.push(["Try again", () => act(t.id, "retry")]);
+  else if (t.state !== "Finished") opts.push(["Pause", () => act(t.id, "pause")]);
+  opts.push([t.state === "Finished" ? "Remove from list (keeps the file)" : "Cancel and remove", () => act(t.id, "remove"), "danger"]);
+  sheet(t.name, `${t.user} · ${t.folder}${t.path ? " · saved to " + t.path : ""}`, opts);
+};
+
+function drawUploads() {
+  const snap = S.snap, st = snap.status, set = snap.settings;
+  let cls = "ok", title, text;
+  if (st.sharing === "off") { cls = ""; title = "Sharing is off"; text = "You can still download. Turn sharing on in Settings."; }
+  else if (st.share_active) { title = `Sharing ${st.shared_files.toLocaleString()} files`; text = st.external_power ? "On the cable: the Q2 stays awake to share." : `On battery, above ${set.battery_min}%.`; }
+  else if (st.scanning) { cls = "warn"; title = "Scanning shared folders…"; text = ""; }
+  else { cls = "warn"; title = "Sharing paused"; text = st.sharing === "charging" ? "Plug in the Q2 to share. Queued uploads start then." : `Plug in the Q2, or wait for the battery to be above ${set.battery_min}%.`; }
+  $("#sharebanner").innerHTML = `<div class="banner ${cls}">${ICON_INFO}<span><b>${esc(title)}</b><span class="small">${esc(text)}</span></span></div>`;
+  $("#uploads").innerHTML = transferList(snap.uploads || [], true) || `<div class="empty">${ICON_UP}No uploads yet.<br>Others can download what you share while sharing is on.</div>`;
+}
+
+// ---- Settings ----
+function drawSettings() {
+  const snap = S.snap, set = snap.settings, st = snap.status;
+  const errs = { refused: st.error, offline: st.error, elsewhere: "Signed in somewhere else. Reconnect to take it back." };
+  $("#acctstate").textContent = st.state === "online" ? "Online" : (errs[st.state] || "");
+  $("#acctstate").style.color = st.state === "online" ? "var(--good)" : errs[st.state] ? "var(--bad)" : "";
+  $("#version").textContent = `q2-soulseek ${snap.version} · listening on port ${st.port}`;
+  $("#s-pin").textContent = snap.pin; $("#s-addr").textContent = snap.addr || "No Wi-Fi";
+  if (st.sharing === "off") $("#sharestat").textContent = "";
+  else $("#sharestat").textContent = st.scanning ? "Scanning…" : `${st.shared_files.toLocaleString()} files · ${st.share_active ? "active" : "paused"}`;
+  if (S.editing) return; // don't overwrite what's being typed
+  $("#a-user").value = set.username || "";
+  $("#a-pass").placeholder = set.has_password ? "Unchanged" : "Choose a password";
+  $$("input[name=share]").forEach(r => r.checked = r.value === set.sharing);
+  $("#s-bmin").value = set.battery_min; $("#bmlabel").textContent = set.battery_min;
+  $("#sharedetails").classList.toggle("hidden", set.sharing === "off");
+  const shared = new Set(set.shares), dl = set.download_dir;
+  const folders = [...new Set([...snap.folders, ...set.shares])].sort();
+  $("#s-folders").innerHTML = folders.map(f => `<label><input type="checkbox" value="${esc(f)}" ${shared.has(f) ? "checked" : ""}>
+    <span>${esc(f)}${f === dl ? ' <span class="small muted">(downloads)</span>' : ""}</span></label>`).join("") || '<span class="small muted">No folders on the card.</span>';
+  $("#s-slots").textContent = set.slots; $("#s-kbps").value = String(set.upload_kbps);
+  $("#s-dldir").value = dl; $("#s-idle").value = String(set.idle_minutes);
+  $("#s-port").value = set.port; $("#s-maxres").value = set.max_results;
+}
+$("#v-settings").addEventListener("focusin", e => { if (e.target.matches("input[type=text],input[type=password],input[type=number]")) S.editing = true; });
+$("#v-settings").addEventListener("focusout", () => { S.editing = false; });
+async function saveSettings(body, msg) { try { await api("settings", body); if (msg) toast(msg); } catch (err) { toast(err.message); } }
+$("#acctform").onsubmit = async e => {
+  e.preventDefault();
+  try { await api("account", { username: $("#a-user").value, password: $("#a-pass").value }); $("#a-pass").value = ""; S.editing = false; toast("Saved. Connecting…"); }
+  catch (err) { toast(err.message); }
+};
+$("#reconnect").onclick = () => api("reconnect", {}).then(() => toast("Reconnecting…")).catch(err => toast(err.message));
+$$("input[name=share]").forEach(r => r.onchange = () => saveSettings({ sharing: r.value }, { off: "Sharing off", charging: "Sharing only while charging", battery: "Sharing while charging or on a full battery" }[r.value]));
+$("#s-bmin").oninput = e => { $("#bmlabel").textContent = e.target.value; };
+$("#s-bmin").onchange = e => saveSettings({ battery_min: +e.target.value });
+$("#s-folders").onchange = () => saveSettings({ shares: $$("#s-folders input:checked").map(i => i.value) }, "Shared folders saved; scanning");
+$$(".stepper button").forEach(b => b.onclick = () => saveSettings({ slots: Math.max(1, Math.min(10, S.snap.settings.slots + +b.dataset.step)) }));
+$("#s-kbps").onchange = e => saveSettings({ upload_kbps: +e.target.value }, "Saved");
+$("#s-dldir").onchange = e => saveSettings({ download_dir: e.target.value }, "Saved");
+$("#s-idle").onchange = e => saveSettings({ idle_minutes: +e.target.value }, "Saved");
+$("#saveadv").onclick = () => saveSettings({ port: +$("#s-port").value, max_results: +$("#s-maxres").value }, "Saved");
+$("#rescan").onclick = () => api("rescan", {}).then(() => toast("Scanning shared folders")).catch(err => toast(err.message));
+$("#resetaccess").onclick = () => sheet("Sign out all phones?", "Every phone needs the new PIN or QR code. This one stays signed in.", [["Sign out all", () => api("access/reset", {}).then(() => toast("New PIN on the Q2")).catch(err => toast(err.message)), "danger"]]);
+$("#stop").onclick = () => sheet("Stop Soulseek?", "Downloads carry on the next time you open Streaming → Soulseek on the Q2.", [["Stop", async () => { await api("stop", {}).catch(() => {}); S.authed = false; document.body.innerHTML = '<div class="center"><div class="gate"><h2>Soulseek stopped</h2><p class="muted">Start it again from Streaming → Soulseek on the Q2.</p></div></div>'; }, "danger"]]);
+
+setTab(S.tab);
+poll();
+</script>
+</body>
+</html>

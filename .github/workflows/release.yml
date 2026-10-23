@@ -1,0 +1,36 @@
+name: Q2 release
+# A tag q2-vX.Y (matching cmd/q2-soulseek/main.go's version) builds the card files and publishes them
+# as the release's only ZIP, which Q2 Pod's System settings -> Apps installs.
+on:
+  push:
+    tags: ['q2-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test
+        run: |
+          go vet ./...
+          go test ./...
+          python3 contrib/shanlingq2/test_launcher.py
+      - name: Build
+        run: contrib/shanlingq2/build.sh target/shanlingq2
+      - name: Publish
+        if: startsWith(github.ref, 'refs/tags/q2-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          want=$(sed -n 's/^const version = "\(q2-v[0-9.]*\)"$/\1/p' cmd/q2-soulseek/main.go)
+          [ "$want" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME, but the version is $want" >&2; exit 1; }
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" --title "q2-soulseek ${GITHUB_REF_NAME#q2-}" --notes "See README.md."
+          gh release upload "$GITHUB_REF_NAME" target/shanlingq2/q2-soulseek-*.zip --clobber

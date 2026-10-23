@@ -1,0 +1,101 @@
+Shanling Q2 tools
+=================
+
+The Q2 runs Linux 5.10 on an Ingenic X2000 (MIPS32r2, nan2008) with glibc 2.28 and no IPv6.
+q2-soulseek runs from the card's .soulseek folder as a Q2 Pod card app (q2-pod's patch/addon.c):
+Q2 Pod lists it in Streaming, starts it from that row, draws its page and keeps the Q2 awake while
+files move. Nothing is flashed for it.
+
+  build.sh     static Go for the Q2 and the card files, in target/shanlingq2/.soulseek, zipped as
+               target/shanlingq2/q2-soulseek-vX.Y-SHA.zip (unzip that at the card's root)
+  package.py   checks the binary (static, MIPS32 little-endian, soft-float ABI), sets the nan2008
+               ELF flag the Q2's kernel requires and Go doesn't, and writes the ZIP
+  launcher.sh  installed as .soulseek/run: q2-soulseek copied to /tmp and run there in a restart loop
+  q2app        installed as .soulseek/q2app: the card app manifest (name=Soulseek)
+  test_launcher.py
+               runs launcher.sh on the host with a fake app
+
+Install
+-------
+
+Q2 Pod's System settings -> Apps installs the latest release over Wi-Fi. By hand, unzip
+q2-soulseek-*.zip from https://github.com/group-a-study/q2-soulseek/releases/latest to the card's
+root with the Q2 powered off. See the top-level README.md.
+
+Build
+-----
+
+  contrib/shanlingq2/build.sh [OUT]
+
+Go 1.22 or later and python3; nothing outside Go's standard library. The binary is CGO_ENABLED=0
+GOOS=linux GOARCH=mipsle GOMIPS=softfloat, static, so it needs none of the Q2's libraries. Tests:
+go test ./... runs two clients against a fake Soulseek server (search, attributes, a resumed
+download, sharing paused on battery and resumed on the cable, refusals, a firewalled connection the
+other way round) and the whole app through its web API, Q2SPOT/1 page and status file; the same
+tests run as MIPS code under qemu-mipsel (go test -exec qemu-mipsel). python3
+contrib/shanlingq2/test_launcher.py tests the launcher. A tag q2-vX.Y matching
+cmd/q2-soulseek/main.go's version publishes the release (.github/workflows/release.yml).
+
+Device
+------
+
+Q2 Pod runs /bin/sh /mnt/mmc/.soulseek/run when Streaming's Soulseek row is pressed and it isn't
+running. The launcher copies q2-soulseek and itself to /tmp and leaves the card at once; the loop
+restarts it after a crash, waiting 5 s and doubling to a minute, and leaves its pid in
+/tmp/q2-soulseek. An exit of 0 (stopped from the Q2 or the phone, or idle) ends the loop. A TERM to
+it stops q2-soulseek cleanly, its downloads saved: Q2 Pod sends it for Stop Streaming Services,
+Home's Rockbox row, an Apps update or remove, and USB storage (after which it starts it again).
+Downloads are written to the card in 512 KB chunks, each file opened and closed around its write,
+and shared files are read the same way, so the card is almost never busy. Its log is
+/tmp/q2-soulseek.log.
+
+  /tmp/q2-soulseek.state
+      rewritten whole when it changes: state (setup, connecting, online, offline, refused,
+      elsewhere), note (the line under the QR code), addr (ip:port of the phone page), pin, qr and
+      qrsize (the code's rows as hex, the leftmost module the high bit of a row's first digit),
+      hold (1: keep the Q2 awake), sharing (Off, On, Paused), dl, queued, done, up, version
+  /tmp/q2-soulseek.sock
+      the datagram q stops it
+  /tmp/q2-soulseek.browse.sock
+      Q2SPOT/1 (q2-pod's docs/librespot.md) for the Q2's page, below
+  port 8080 (the next free one if taken)
+      the phone page. The QR code carries a key that signs the browser in; typed by hand, the page
+      asks for the PIN on the Q2's screen. Ten wrong PINs lock it for a minute. Settings -> On the
+      Q2 -> Sign out all phones makes a new key and PIN
+  .soulseek/config.json, .soulseek/downloads.json, .soulseek/shares.cache
+      settings (the password as typed), the transfers and the share index; updates keep them
+
+Network: the Soulseek server is server.slsknet.org:2242; the app logs in as an experimental client
+(major version 177, as SLSKPROTOCOL.md asks of new clients). It listens on port 2234 for other users
+(the next free one if taken). Behind a router without that port forwarded, other users still reach
+you indirectly through the server as long as their own port is open; forwarding it brings more
+results and faster connections. While sharing is on, the Q2 answers other users' searches, joins
+the distributed search network as a leaf (it takes no children), and sends files from the shared
+folders, upload_slots (2) at a time.
+
+The page
+--------
+
+Each row's kind says what a press does (q2-pod's patch/addon.c): list opens the level uri (its
+argument the row's context), action sends uri with the context and toasts the reply's message,
+search opens the Q2's keyboard (OK asks for search <text>), remote opens the QR code, info does
+nothing. A row's position, when set, is the op a held Play/Pause sends. An ok reply whose message
+is refresh is asked again every 2 s while it is on top.
+
+  menu
+      Phone Remote, Search, Downloads, Uploads, Sharing, Account, Stop Soulseek; before setup,
+      Set up on your phone and Stop Soulseek
+  search <term> [cursor]
+      the term's audio results, 50 a page; action download <search.n>, held downloadfolder
+  downloads, uploads [cursor]
+      a list transfer <id> row each
+  transfer <id>
+      its state, and Pause, Resume, Try Again, Remove
+  account
+      the name, status, shares and port
+  set sharing
+      the next sharing mode, saved
+  download, downloadfolder <search.n>
+      that result's file, or its folder
+  pause, resume, retry, remove <id>, stop
+      the transfer; the app ends
