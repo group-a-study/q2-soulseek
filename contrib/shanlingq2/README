@@ -34,7 +34,8 @@ Go 1.22 or later and python3; nothing outside Go's standard library. The binary 
 GOOS=linux GOARCH=mipsle GOMIPS=softfloat, static, so it needs none of the Q2's libraries. Tests:
 go test ./... runs two clients against a fake Soulseek server (search, attributes, a resumed
 download, sharing paused on battery and resumed on the cable, refusals, a firewalled connection the
-other way round) and the whole app through its web API, Q2SPOT/1 page and status file; the same
+other way round), answers past a search's limits, the battery gauge, and the whole app through its
+web API, Q2SPOT/1 page (a popular search's folders a page at a time) and status file; the same
 tests run as MIPS code under qemu-mipsel (go test -exec qemu-mipsel). python3
 contrib/shanlingq2/test_launcher.py tests the launcher. A tag q2-vX.Y matching
 cmd/q2-soulseek/main.go's version publishes the release (.github/workflows/release.yml).
@@ -52,6 +53,11 @@ Downloads are written to the card in 512 KB chunks, each file opened and closed 
 and shared files are read the same way, so the card is almost never busy. Its log is
 /tmp/q2-soulseek.log.
 
+  battery
+      the level is the CW2015 fuel gauge's (/sys/devices/i2c-0/0-0062/cw2015_capacity), which
+      stock's status bar reads, or failing that the battery supply's capacity (the AXP2101's own
+      estimate, which can be well off it); the cable is axp2101_charger's online flag. Both are
+      read every 10 s, and the phone page hears of a change at once
   /tmp/q2-soulseek.state
       rewritten whole when it changes: state (setup, connecting, online, offline, refused,
       elsewhere), note (the line under the QR code), addr (ip:port of the phone page), pin, qr and
@@ -72,7 +78,10 @@ Network: the Soulseek server is server.slsknet.org:2242; the app logs in as an e
 (major version 177, as SLSKPROTOCOL.md asks of new clients). It listens on port 2234 for other users
 (the next free one if taken). Behind a router without that port forwarded, other users still reach
 you indirectly through the server as long as their own port is open; forwarding it brings more
-results and faster connections. While sharing is on, the Q2 answers other users' searches, joins
+results and faster connections. A search keeps 150 files from each user and 3000 in all, so a
+popular one reaches at least 20 users; answers are read as they inflate, two at a time, and only
+the files kept are held, so hundreds of users answering at once fit in the Q2's memory. While
+sharing is on, the Q2 answers other users' searches, joins
 the distributed search network as a leaf (it takes no children), and sends files from the shared
 folders, upload_slots (2) at a time.
 
@@ -83,13 +92,19 @@ Each row's kind says what a press does (q2-pod's patch/addon.c): list opens the 
 argument the row's context), action sends uri with the context and toasts the reply's message,
 search opens the Q2's keyboard (OK asks for search <text>), remote opens the QR code, info does
 nothing. A row's position, when set, is the op a held Play/Pause sends. An ok reply whose message
-is refresh is asked again every 2 s while it is on top.
+is refresh is asked again every 2 s while it is on top. A list's cursor is its last argument (Q2
+Pod up to 1.4.1 sent each More…'s cursor after the one before).
 
   menu
       Phone Remote, Search, Downloads, Uploads, Sharing, Account, Stop Soulseek; before setup,
       Set up on your phone and Stop Soulseek
   search <term> [cursor]
-      the term's audio results, 50 a page; action download <search.n>, held downloadfolder
+      the folders of the term's audio files, a page of up to 50: list folder <search.n>, held
+      downloadfolder. Each ask groups only the results since the last and puts new folders after
+      the old ones (a free slot, then the fastest, first), so rows keep their places
+  folder <search.n> [cursor]
+      Download Folder, then the folder's files by name: action download <search.n>, held
+      downloadfolder
   downloads, uploads [cursor]
       a list transfer <id> row each
   transfer <id>

@@ -6,10 +6,12 @@ import (
 	"time"
 )
 
+// A search keeps at most maxSearchResults files, maxUserResults from each user, so one popular
+// search reaches at least 20 users.
 const (
 	maxSearches      = 8
 	maxSearchResults = 3000
-	maxUserResults   = 500
+	maxUserResults   = 150
 )
 
 // Search is one of our searches and what has come back for it.
@@ -153,37 +155,66 @@ func (r Result) FolderOf() (user, folder string) {
 	return r.user, dir
 }
 
+// search is our search for token, nil once it is closed. Called with c.mu held.
+func (c *Client) search(token uint32) *Search {
+	for _, s := range c.searches {
+		if s.Token == token {
+			return s
+		}
+	}
+	return nil
+}
+
+// room is how many of user's files the search for token still takes: none once it is closed or
+// full, or user has answered it.
+func (c *Client) room(token uint32, user string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	s := c.search(token)
+	if s == nil || s.users[user] {
+		return 0
+	}
+	return min(maxUserResults, maxSearchResults-len(s.Results))
+}
+
+// searchResponse takes a user's answer to one of our searches. A popular search brings hundreds at
+// once, some listing thousands of files, so at most cap(c.inflating) are read at a time, each as it
+// inflates, and only the files the search keeps are held: the Q2's memory is small.
 func (c *Client) searchResponse(from string, r *reader) {
-	raw, err := decompress(r.b, 16<<20)
+	c.inflating <- struct{}{}
+	defer func() { <-c.inflating }()
+	z, done, err := inflate(r.b, 16<<20)
 	if err != nil {
 		return
 	}
-	r = &reader{b: raw}
-	user := r.str()
-	token := r.u32()
-	files := readFiles(r, 100000)
-	free := r.boolean()
-	speed := r.u32()
-	queue := r.u32()
-	if r.err != nil {
+	defer done()
+	user := z.str(true)
+	token := z.u32()
+	if z.err != nil {
 		return
-	}
-	r.u32()
-	var private []File
-	if len(r.b) >= 4 {
-		private = readFiles(r, 100000)
 	}
 	if user == "" {
 		user = from
 	}
+	keep := c.room(token, user)
+	if keep <= 0 {
+		return
+	}
+	files := z.files(100000, keep)
+	free := z.boolean()
+	speed := z.u32()
+	queue := z.u32()
+	if z.err != nil {
+		return
+	}
+	z.u32()
+	private := z.files(100000, keep-len(files))
+	if z.err != nil {
+		private = nil
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	var s *Search
-	for _, x := range c.searches {
-		if x.Token == token {
-			s = x
-		}
-	}
+	s := c.search(token)
 	if s == nil || s.users[user] {
 		return
 	}
@@ -217,15 +248,11 @@ func (c *Client) searchResponse(from string, r *reader) {
 		}
 		s.Results = append(s.Results, res)
 	}
-	for i, f := range files {
-		if i < maxUserResults {
-			add(f, false)
-		}
+	for _, f := range files {
+		add(f, false)
 	}
-	for i, f := range private {
-		if i < maxUserResults {
-			add(f, true)
-		}
+	for _, f := range private {
+		add(f, true)
 	}
 	c.notify()
 }

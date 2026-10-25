@@ -20,6 +20,16 @@ import (
 	"github.com/group-a-study/q2-soulseek/internal/slsk"
 )
 
+// TestMain sets the package-wide paths once: a stopped client's goroutines can outlive their test.
+func TestMain(m *testing.M) {
+	q2.Card = "/no-card"
+	power.Root, _ = os.MkdirTemp("", "q2-soulseek-power")
+	power.Gauge = filepath.Join(power.Root, "no-gauge")
+	code := m.Run()
+	os.RemoveAll(power.Root)
+	os.Exit(code)
+}
+
 func waitFor(t *testing.T, what string, d time.Duration, ok func() bool) {
 	t.Helper()
 	for end := time.Now().Add(d); !ok(); time.Sleep(25 * time.Millisecond) {
@@ -57,8 +67,6 @@ type world struct {
 }
 
 func newWorld(t *testing.T) *world {
-	q2.Card = "/no-card"
-	power.Root = t.TempDir()
 	writePower(t, "0")
 	srv, err := slsk.NewFakeServer("127.0.0.1:0")
 	if err != nil {
@@ -274,8 +282,8 @@ func TestAddOn(t *testing.T) {
 		t.Fatalf("downloaded %d %v", len(got), err)
 	}
 
-	// The Q2's page: the menu, a search's audio files (download on press, the folder on hold),
-	// the downloads and a transfer's actions.
+	// The Q2's page: the menu, a search's folders (a press lists the files, a hold downloads the
+	// folder), a folder's files (download on press), the downloads and a transfer's actions.
 	head, rows := w.ask(t, "menu")
 	if head[1] != "ok" || head[2] != "refresh" || len(rows) != 7 || rows[0][0] != "remote" || rows[1][0] != "search" ||
 		rows[2][2] != "Downloads" || rows[2][3] != "3 finished" || rows[4][2] != "Sharing: Off" {
@@ -287,13 +295,18 @@ func TestAddOn(t *testing.T) {
 	}
 	waitFor(t, "a Q2 result", 10*time.Second, func() bool {
 		_, rows = w.ask(t, "search", "dots loops brakhage")
-		return len(rows) == 1 && rows[0][0] == "action"
+		return len(rows) >= 1 && rows[0][0] == "list"
 	})
-	if r := rows[0]; r[1] != "download" || r[5] != "downloadfolder" || r[2] != "01 Brakhage.flac" ||
-		!strings.HasPrefix(r[3], "bob · FLAC · 300 KB") {
+	if r := rows[0]; r[1] != "folder" || r[5] != "downloadfolder" || r[2] != "Dots and Loops" ||
+		r[3] != "bob · 1 file · FLAC · 300 KB · free" {
 		t.Fatalf("Q2 result %q", r)
 	}
-	if head, _ = w.ask(t, "download", rows[0][4]); head[1] != "ok" || head[2] != "Downloading 01 Brakhage.flac" {
+	_, rows = w.ask(t, "folder", rows[0][4])
+	if titles(rows) != "action:Download Folder | action:01 Brakhage.flac" || rows[0][1] != "downloadfolder" ||
+		rows[1][1] != "download" || rows[1][5] != "downloadfolder" || !strings.HasPrefix(rows[1][3], "FLAC · 300 KB") {
+		t.Fatalf("Q2 folder %q", rows)
+	}
+	if head, _ = w.ask(t, "download", rows[1][4]); head[1] != "ok" || head[2] != "Downloading 01 Brakhage.flac" {
 		t.Fatalf("download %q", head)
 	}
 	if head, _ = w.ask(t, "download", "99.0"); head[1] != "unavailable" {
@@ -327,6 +340,58 @@ func TestAddOn(t *testing.T) {
 	// Stop from the Q2: the state file goes, as the payload looks for.
 	w.ask(t, "stop")
 	waitFor(t, "the stop", 5*time.Second, func() bool { _, err := os.Stat(w.a.state.Path); return os.IsNotExist(err) })
+}
+
+// A popular search on the Q2: its folders 50 a page, each in the place it first had while results
+// come in, the cursor the last argument (as Q2 Pod up to 1.4.1 sent them all), a folder's files.
+func TestQ2SearchPages(t *testing.T) {
+	w := newWorld(t)
+	w.a.update(func(s *settings) { s.Username, s.Password = "alice", "pw" })
+	music := w.bob.Config().Shares[0]
+	for i := 0; i < 60; i++ {
+		dir := filepath.Join(music, "Jimi Hendrix", fmt.Sprintf("Album %02d", i))
+		os.MkdirAll(dir, 0o755)
+		os.WriteFile(filepath.Join(dir, "01 Purple Haze.mp3"), make([]byte, 2048), 0o644)
+		os.WriteFile(filepath.Join(dir, "02 Little Wing.mp3"), make([]byte, 1024), 0o644)
+	}
+	waitFor(t, "bob sharing", 10*time.Second, func() bool { return w.bob.Status().ShareActive })
+	cfg := w.bob.Config()
+	cfg.MaxResults = 500 // all 120 files in one answer
+	w.bob.SetConfig(cfg)
+	w.bob.Rescan()
+	waitFor(t, "bob's albums", 10*time.Second, func() bool { st := w.bob.Status(); return !st.Scanning && st.SharedFiles == 123 })
+	waitFor(t, "online", 10*time.Second, func() bool { return w.a.client.Status().State == slsk.StateOnline })
+
+	var head []string
+	var rows [][]string
+	waitFor(t, "the folders", 10*time.Second, func() bool {
+		head, rows = w.ask(t, "search", "hendrix")
+		return head[3] != ""
+	})
+	if head[2] != "refresh" || head[3] != "50" || len(rows) != 50 || rows[0][0] != "list" || rows[0][1] != "folder" ||
+		!strings.HasPrefix(rows[0][2], "Album ") || !strings.HasPrefix(rows[0][3], "bob · 2 files · MP3") {
+		t.Fatalf("page 1 %q %s", head, titles(rows[:1]))
+	}
+	if _, again := w.ask(t, "search", "hendrix"); titles(again) != titles(rows) {
+		t.Fatal("the rows moved")
+	}
+	for _, args := range [][]string{{"hendrix", "50"}, {"hendrix", "25", "50"}} {
+		h, page2 := w.ask(t, "search", args...)
+		if h[3] != "" || len(page2) != 11 || page2[10][0] != "info" || page2[10][2] != "Searching…" {
+			t.Fatalf("page 2 for %q: %q %s", args, h, titles(page2))
+		}
+	}
+	_, files := w.ask(t, "folder", rows[3][4])
+	if titles(files) != "action:Download Folder | action:01 Purple Haze.mp3 | action:02 Little Wing.mp3" ||
+		files[0][3] != "2 files · 3 KB from bob · free" {
+		t.Fatalf("a folder %q", files)
+	}
+	if h, _ := w.ask(t, "folder", "99.0"); h[1] != "unavailable" {
+		t.Fatalf("a gone folder %q", h)
+	}
+	if h, _ := w.ask(t, "downloadfolder", rows[3][4]); h[1] != "ok" {
+		t.Fatalf("a held folder %q", h)
+	}
 }
 
 // TestPreview serves the phone page against the fake network for a look in a browser:

@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -14,7 +16,9 @@ import (
 // what a press does (contrib/shanlingq2/README, The Q2's page). list opens the level uri (arguments: context);
 // action sends uri with context and toasts the message; search opens the search box; remote opens
 // the QR code; info does nothing. A row's position, when set, is the op Play/Pause held sends.
-// An ok reply whose message is "refresh" is asked again every 2 s while it is on top.
+// An ok reply whose message is "refresh" is asked again every 2 s while it is on top. A list's
+// cursor is its last argument: Q2 Pod's card app page up to 1.4.1 sent each More…'s cursor after
+// the one before ("search hendrix 50 100").
 
 const refresh = "refresh"
 
@@ -103,7 +107,7 @@ func (a *app) device(req q2spot.Request) q2spot.Reply {
 	switch req.Op {
 	case "caps":
 		var rows []q2spot.Row
-		for _, op := range []string{"menu", "search", "downloads", "transfer", "uploads", "account", "set",
+		for _, op := range []string{"menu", "search", "folder", "downloads", "transfer", "uploads", "account", "set",
 			"download", "downloadfolder", "pause", "resume", "retry", "remove", "stop"} {
 			rows = append(rows, q2spot.Row{Kind: "op", URI: op})
 		}
@@ -111,12 +115,14 @@ func (a *app) device(req q2spot.Request) q2spot.Reply {
 	case "menu":
 		return a.menu(st, set)
 	case "search":
-		return a.search(req.Arg(0), req.Arg(1), st)
+		return a.search(req.Arg(0), cursor(req, 1), st)
+	case "folder":
+		return a.folder(req.Arg(0), cursor(req, 1))
 	case "downloads":
-		return a.transfers(c.Downloads(), req.Arg(0), "No downloads yet", "Search, then press a file")
+		return a.transfers(c.Downloads(), cursor(req, 0), "No downloads yet", "Search, then press a folder")
 	case "uploads":
 		rows := []q2spot.Row{info("Sharing: "+sharingNames[st.Sharing], sharingLine(st, set.BatteryMin))}
-		r := a.transfers(c.Uploads(), req.Arg(0), "No uploads yet", "Others download what you share")
+		r := a.transfers(c.Uploads(), cursor(req, 0), "No uploads yet", "Others download what you share")
 		r.Rows = append(rows, r.Rows...)
 		return r
 	case "transfer":
@@ -207,8 +213,138 @@ func (a *app) menu(st slsk.Status, set settings) q2spot.Reply {
 	}}
 }
 
-// search starts a search for term (or comes back to one from the last ten minutes) and lists its
-// audio files, 50 a page from cursor.
+// cursor is a list request's cursor, its argument after the n that name the list: the last one.
+func cursor(req q2spot.Request, n int) string {
+	if len(req.Args) <= n {
+		return ""
+	}
+	return req.Args[len(req.Args)-1]
+}
+
+// page is rows from cursor on, as many as fit, with the cursor for the rest; msg the reply's.
+func page(rows []q2spot.Row, cursor, msg string) q2spot.Reply {
+	from, _ := strconv.Atoi(cursor)
+	if from < 0 || from > len(rows) {
+		from = len(rows)
+	}
+	r := q2spot.Reply{Message: msg, Rows: rows[from:]}
+	if _, kept := r.Encode("0"); from+kept < len(rows) {
+		r.Rows = rows[from : from+kept]
+		r.Cursor = strconv.Itoa(from + kept)
+	}
+	return r
+}
+
+// listing is a search's audio files in folders, as the Q2's page shows them. Each ask groups only
+// the results since the last one, and new folders go after the ones already listed, the best of
+// them first (a free slot, then the fastest, then the most files), so a row keeps its place under
+// the wheel while results come in. A user's files all come in one answer, so a folder is whole
+// when it first shows.
+type listing struct {
+	seen    int // results grouped
+	folders []*folder
+	byKey   map[string]*folder
+}
+
+// folder is one user's folder of audio files in a search's results.
+type folder struct {
+	user, path   string // as shown
+	ns           []int  // its files' result numbers
+	size         uint64
+	free         bool
+	speed, queue uint32
+	quality      string // its first file's
+}
+
+func folderKey(user, path string) string { return user + "\x00" + path }
+
+// listed is the search token's folders, brought up to date.
+func (a *app) listed(token uint32) (slsk.SearchInfo, []*folder, bool) {
+	a.lmu.Lock()
+	defer a.lmu.Unlock()
+	l := a.listings[token]
+	if l == nil {
+		l = &listing{byKey: map[string]*folder{}}
+	}
+	info, results, ok := a.client.Results(token, l.seen)
+	if !ok {
+		delete(a.listings, token)
+		return info, nil, false
+	}
+	if a.listings[token] == nil {
+		live := map[uint32]bool{}
+		for _, s := range a.client.Searches() {
+			live[s.Token] = true
+		}
+		for t := range a.listings {
+			if !live[t] {
+				delete(a.listings, t)
+			}
+		}
+		a.listings[token] = l
+	}
+	l.seen += len(results)
+	var fresh []*folder
+	for _, r := range results {
+		if !audio[r.Ext] {
+			continue
+		}
+		k := folderKey(r.User, r.Folder)
+		f := l.byKey[k]
+		if f == nil {
+			f = &folder{user: r.User, path: r.Folder, free: r.Free, speed: r.Speed, queue: r.Queue, quality: quality(r)}
+			l.byKey[k] = f
+			fresh = append(fresh, f)
+		}
+		f.ns = append(f.ns, r.N)
+		f.size += r.Size
+	}
+	sort.SliceStable(fresh, func(i, j int) bool {
+		x, y := fresh[i], fresh[j]
+		if x.free != y.free {
+			return x.free
+		}
+		if x.speed != y.speed {
+			return x.speed > y.speed
+		}
+		return len(x.ns) > len(y.ns)
+	})
+	l.folders = append(l.folders, fresh...)
+	return info, l.folders[:len(l.folders):len(l.folders)], true
+}
+
+var discFolder = regexp.MustCompile(`(?i)^(cd|disc|disk)\s*\d+$`)
+
+// folderName is a folder's last part, with the one before it for a disc of an album (CD1).
+func folderName(path string) string {
+	parts := strings.Split(path, "\\")
+	name := parts[len(parts)-1]
+	if len(parts) > 1 && discFolder.MatchString(name) {
+		name = parts[len(parts)-2] + " · " + name
+	}
+	return name
+}
+
+func plural(n int, one string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return fmt.Sprintf("%d %ss", n, one)
+}
+
+func slot(free bool, queue uint32) string {
+	switch {
+	case free:
+		return " · free"
+	case queue > 0:
+		return fmt.Sprintf(" · queue %d", queue)
+	}
+	return ""
+}
+
+// search starts a search for term (or comes back to one from the last ten minutes) and lists the
+// folders its audio files are in, a page at a time from cursor: a press lists a folder's files,
+// Play/Pause held downloads it all.
 func (a *app) search(term, cursor string, st slsk.Status) q2spot.Reply {
 	c := a.client
 	if st.State != slsk.StateOnline {
@@ -221,42 +357,65 @@ func (a *app) search(term, cursor string, st slsk.Status) q2spot.Reply {
 			return q2spot.Fail(q2spot.Error, err.Error())
 		}
 	}
-	info0, results, _ := c.Results(token, 0)
-	from, _ := strconv.Atoi(cursor)
-	var rows []q2spot.Row
-	shown := 0
-	for _, r := range results {
-		if !audio[r.Ext] {
-			continue
+	si, folders, _ := a.listed(token)
+	rows := make([]q2spot.Row, 0, len(folders))
+	for _, f := range folders {
+		rows = append(rows, q2spot.Row{Kind: "list", URI: "folder", Context: fmt.Sprintf("%d.%d", token, f.ns[0]),
+			Position: "downloadfolder", Title: folderName(f.path),
+			Subtitle: f.user + " · " + plural(len(f.ns), "file") + " · " + f.quality + " · " + size(int64(f.size)) + slot(f.free, f.queue)})
+	}
+	young := time.Since(time.Unix(si.Started, 0)) < 60*time.Second
+	msg := ""
+	if young {
+		msg = refresh
+	}
+	r := page(rows, cursor, msg)
+	switch {
+	case len(rows) == 0 && young:
+		r.Rows = []q2spot.Row{info("Searching…", fmt.Sprintf("%s answered", plural(si.Users, "user")))}
+	case len(rows) == 0:
+		r.Rows = []q2spot.Row{info("Nothing found", "Try other words")}
+	case young && r.Cursor == "" && len(r.Rows) < q2spot.MaxRows:
+		r.Rows = append(r.Rows, info("Searching…", "More may come in"))
+	}
+	return r
+}
+
+// folder lists a folder of a search's results (ctx: <token>.<n>, n one of its files): Download
+// Folder, then its files by name, each downloaded by a press.
+func (a *app) folder(ctx, cursor string) q2spot.Reply {
+	tok, n, _ := strings.Cut(ctx, ".")
+	t, _ := strconv.Atoi(tok)
+	k, _ := strconv.Atoi(n)
+	res, have := a.client.Result(uint32(t), k)
+	_, folders, _ := a.listed(uint32(t))
+	var f *folder
+	for _, x := range folders {
+		if have && x.user == res.User && x.path == res.Folder {
+			f = x
 		}
-		if shown++; shown <= from {
-			continue
+	}
+	if f == nil {
+		return q2spot.Fail(q2spot.Unavailable, "That result is gone; search again")
+	}
+	files := make([]slsk.Result, 0, len(f.ns))
+	for _, n := range f.ns {
+		if r, ok := a.client.Result(uint32(t), n); ok {
+			files = append(files, r)
 		}
-		sub := r.User + " · " + quality(r) + " · " + size(int64(r.Size))
-		if r.Free {
-			sub += " · free"
-		} else if r.Queue > 0 {
-			sub += fmt.Sprintf(" · queue %d", r.Queue)
+	}
+	sort.SliceStable(files, func(i, j int) bool { return files[i].Name < files[j].Name })
+	rows := []q2spot.Row{{Kind: "action", URI: "downloadfolder", Context: ctx, Title: "Download Folder",
+		Subtitle: plural(len(f.ns), "file") + " · " + size(int64(f.size)) + " from " + f.user + slot(f.free, f.queue)}}
+	for _, r := range files {
+		sub := quality(r) + " · " + size(int64(r.Size))
+		if r.Duration > 0 {
+			sub += fmt.Sprintf(" · %d:%02d", r.Duration/60, r.Duration%60)
 		}
-		rows = append(rows, q2spot.Row{Kind: "action", URI: "download", Context: fmt.Sprintf("%d.%d", token, r.N),
+		rows = append(rows, q2spot.Row{Kind: "action", URI: "download", Context: fmt.Sprintf("%d.%d", t, r.N),
 			Position: "downloadfolder", Title: r.Name, Subtitle: sub})
 	}
-	young := time.Since(time.Unix(info0.Started, 0)) < 60*time.Second
-	reply := q2spot.Reply{}
-	if len(rows) > q2spot.MaxRows {
-		rows = rows[:q2spot.MaxRows]
-		reply.Cursor = strconv.Itoa(from + q2spot.MaxRows)
-	}
-	if young {
-		reply.Message = refresh
-		if len(rows) == 0 {
-			rows = append(rows, info("Searching…", fmt.Sprintf("%d users answered", info0.Users)))
-		}
-	} else if len(rows) == 0 && from == 0 {
-		rows = append(rows, info("Nothing found", "Try other words"))
-	}
-	reply.Rows = rows
-	return reply
+	return page(rows, cursor, "")
 }
 
 func (a *app) transfers(list []slsk.Info, cursor, empty, hint string) q2spot.Reply {

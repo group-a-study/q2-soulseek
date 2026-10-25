@@ -27,7 +27,7 @@ import (
 	"github.com/group-a-study/q2-soulseek/internal/slsk"
 )
 
-const version = "q2-v1.1"
+const version = "q2-v1.2"
 
 // settings is .soulseek/config.json: the client's configuration, the phone's key and PIN, and when
 // to stop by itself.
@@ -58,6 +58,9 @@ type app struct {
 	webAt     time.Time // the phone's last request
 	busyAt    time.Time // a transfer last moved
 	pendingAt time.Time // downloads started waiting
+
+	lmu      sync.Mutex
+	listings map[uint32]*listing // the Q2's searches in folders, by token (device.go)
 
 	quit chan struct{}
 	once sync.Once
@@ -95,7 +98,8 @@ func main() {
 // start logs in and serves the phone page, the Q2's page and the control socket.
 func start(o options) (*app, error) {
 	os.MkdirAll(o.dir, 0o755)
-	a := &app{dir: o.dir, card: o.card, opts: o, state: &q2.State{Path: o.statusFile}, quit: make(chan struct{})}
+	a := &app{dir: o.dir, card: o.card, opts: o, state: &q2.State{Path: o.statusFile}, quit: make(chan struct{}),
+		listings: map[uint32]*listing{}}
 	a.set = loadSettings(o.dir, o.card)
 	a.client = slsk.New(a.set.Config, o.dir)
 	l, port := listenHTTP(o.httpPort)

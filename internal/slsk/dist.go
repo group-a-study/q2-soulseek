@@ -181,12 +181,15 @@ func ShareAllowed(mode string, min int, p power.Status) bool {
 
 // updateSharing starts or stops sharing as the power and the setting allow. Stopping ends running
 // uploads (they wait in the queue for the next time), leaves the distributed network and stops
-// answering searches.
+// answering searches. A new level or cable is a change too, so the phone shows it at once.
 func (c *Client) updateSharing() {
 	p := power.Read()
 	c.mu.Lock()
 	active := ShareAllowed(c.cfg.Sharing, c.cfg.BatteryMin, p) && c.shares != nil
 	changed := active != c.shareActive
+	if changed || p != c.pow {
+		c.notify()
+	}
 	c.pow, c.shareActive = p, active
 	var parent *conn
 	if changed && !active {
@@ -199,9 +202,6 @@ func (c *Client) updateSharing() {
 				u.State, u.Err = Queued, "Waiting: sharing paused"
 			}
 		}
-	}
-	if changed {
-		c.notify()
 	}
 	c.mu.Unlock()
 	if parent != nil {

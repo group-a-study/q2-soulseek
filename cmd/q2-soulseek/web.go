@@ -432,6 +432,10 @@ func trim(l []slsk.Info, keep int) []slsk.Info {
 	return out
 }
 
+// resultsPage is how many results one reply carries; the page asks again for the rest, so the Q2
+// never encodes a search's thousands at once.
+const resultsPage = 500
+
 func (w *web) results(rw http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(r.URL.Query().Get("id"))
 	from, _ := strconv.Atoi(r.URL.Query().Get("from"))
@@ -440,5 +444,5 @@ func (w *web) results(rw http.ResponseWriter, r *http.Request) {
 		fail(rw, http.StatusNotFound, "That search is gone.")
 		return
 	}
-	reply(rw, http.StatusOK, map[string]any{"search": info, "from": from, "results": list})
+	reply(rw, http.StatusOK, map[string]any{"search": info, "from": from, "results": list[:min(len(list), resultsPage)]})
 }

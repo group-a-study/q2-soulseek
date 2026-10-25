@@ -4,6 +4,7 @@
 package slsk
 
 import (
+	"bufio"
 	"bytes"
 	"compress/zlib"
 	"encoding/binary"
@@ -250,6 +251,112 @@ func readFiles(r *reader, max int) []File {
 		}
 		for j := 0; j < na; j++ {
 			f.Attrs = append(f.Attrs, Attr{r.u32(), r.u32()})
+		}
+		files = append(files, f)
+	}
+	return files
+}
+
+// stream takes a compressed message body apart as it inflates, so a big one is never held whole;
+// as reader, the first error sticks.
+type stream struct {
+	r   *bufio.Reader
+	err error
+}
+
+// inflate reads b's zlib stream, at most max bytes of it; close ends it.
+func inflate(b []byte, max int64) (*stream, func(), error) {
+	z, err := zlib.NewReader(bytes.NewReader(b))
+	if err != nil {
+		return nil, nil, err
+	}
+	return &stream{r: bufio.NewReaderSize(io.LimitReader(z, max), 4096)}, func() { z.Close() }, nil
+}
+
+func (s *stream) take(n int) []byte {
+	if s.err != nil {
+		return nil
+	}
+	v, err := s.r.Peek(n)
+	if err != nil {
+		s.err = errShort
+		return nil
+	}
+	s.r.Discard(n)
+	return v
+}
+
+func (s *stream) skip(n int) {
+	if s.err == nil {
+		if k, _ := s.r.Discard(n); k < n {
+			s.err = errShort
+		}
+	}
+}
+
+func (s *stream) u8() uint8 {
+	if v := s.take(1); v != nil {
+		return v[0]
+	}
+	return 0
+}
+func (s *stream) u32() uint32 {
+	if v := s.take(4); v != nil {
+		return binary.LittleEndian.Uint32(v)
+	}
+	return 0
+}
+func (s *stream) u64() uint64 {
+	if v := s.take(8); v != nil {
+		return binary.LittleEndian.Uint64(v)
+	}
+	return 0
+}
+func (s *stream) boolean() bool { return s.u8() != 0 }
+
+// str reads a string; keep false skips its bytes instead.
+func (s *stream) str(keep bool) string {
+	n := int(s.u32())
+	if s.err != nil || n < 0 || n > 64<<10 {
+		s.err = errShort
+		return ""
+	}
+	if !keep {
+		s.skip(n)
+		return ""
+	}
+	b := make([]byte, n)
+	if _, err := io.ReadFull(s.r, b); err != nil {
+		s.err = errShort
+		return ""
+	}
+	return string(b)
+}
+
+// files reads a file list of at most max entries, keeping the first keep of them and only
+// stepping over the rest.
+func (s *stream) files(max, keep int) []File {
+	n := int(s.u32())
+	if s.err != nil || n > max {
+		s.err = errShort
+		return nil
+	}
+	files := make([]File, 0, min(n, keep))
+	for i := 0; i < n && s.err == nil; i++ {
+		k := i < keep
+		s.u8()
+		f := File{Name: s.str(k), Size: s.u64(), Ext: s.str(k)}
+		na := int(s.u32())
+		if na > 64 {
+			s.err = errShort
+			break
+		}
+		if !k {
+			s.skip(8 * na)
+			continue
+		}
+		for j := 0; j < na; j++ {
+			f.Attrs = append(f.Attrs, Attr{s.u32(), s.u32()})
 		}
 		files = append(files, f)
 	}

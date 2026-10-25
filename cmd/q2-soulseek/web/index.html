@@ -164,6 +164,9 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px v
 .err { color: var(--bad); font-size: 14px; min-height: 20px; margin: 8px 0; }
 .foot { text-align: center; color: var(--muted); font-size: 12px; margin: 20px 0 8px; }
 .morebtn { display: block; margin: 8px auto 20px; }
+.fresh { position: sticky; top: calc(66px + env(safe-area-inset-top)); z-index: 15; display: block; margin: 0 auto 10px;
+  border-radius: 999px; box-shadow: var(--shadow); }
+@media (min-width: 760px) { .fresh { top: 112px; } }
 </style>
 </head>
 <body>
@@ -214,6 +217,7 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px v
         <label class="toggle"><input type="checkbox" id="f-free"> Free slot</label>
       </div>
     </div>
+    <button class="btn primary slim fresh hidden" id="fresh" type="button"></button>
     <div id="results"></div>
   </section>
 
@@ -305,17 +309,28 @@ const ICON_DOWN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" st
 const ICON_UP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V8m0 0 4.5 4.5M12 8l-4.5 4.5"/><path d="M5 4h14"/></svg>';
 const ICON_INFO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>';
 const ICON_BOLT = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>';
+const byName = new Intl.Collator(undefined, { numeric: true }).compare; // one collator: localeCompare with options makes one a call
+const ROWS = 200; // file rows a results page shows, and each Show more adds
 
 const S = { v: -1, snap: null, tab: localStorage.getItem("tab") || "search", current: null, results: {}, sel: new Set(),
-  filters: { in: "", out: "", type: "", br: 0, sort: "best", free: false }, dlf: "all", shown: 40, authed: true, editing: false };
+  filters: { in: "", out: "", type: "", br: 0, sort: "best", free: false }, dlf: "all", rows: ROWS, authed: true, editing: false,
+  drawn: { key: "", n: 0, full: false }, fails: 0, poller: null };
 
-async function api(path, body) {
+// api asks the Q2; a request gets 20 s (a long poll 35: the Q2 holds it up to 25), so a Q2 gone
+// quiet shows as such instead of hanging. ctl aborts it early.
+async function api(path, body, ctl = new AbortController()) {
   const opt = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json", "X-Q2": "1" }, body: JSON.stringify(body) };
-  const r = await fetch("/api/" + path, opt);
-  if (r.status === 401) { S.authed = false; showGate(); throw new Error("Sign in"); }
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || r.statusText);
-  return j;
+  opt.signal = ctl.signal;
+  const t = setTimeout(() => ctl.abort(), path.startsWith("state") ? 35000 : 20000);
+  try {
+    const r = await fetch("/api/" + path, opt);
+    if (r.status === 401) { S.authed = false; showGate(); throw new Error("Sign in"); }
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    return j;
+  } catch (e) {
+    throw e.name === "AbortError" ? new Error("The Q2 didn't answer") : e;
+  } finally { clearTimeout(t); }
 }
 
 let toastTimer;
@@ -371,18 +386,33 @@ function setTab(t) {
 $$("#tabs button").forEach(b => b.onclick = () => setTab(b.dataset.tab));
 
 // ---- State, by long poll: the server answers once something changed ----
+// One poll at a time, and none while the page is hidden: a phone suspends a hidden page's requests,
+// and they come back failed, which isn't the Q2's doing. A miss shows Reconnecting; three in a row
+// (about 3 s) show the Q2 unreachable.
 async function poll() {
-  while (S.authed) {
+  if (S.poller || !S.authed || document.hidden) return;
+  const me = S.poller = {};
+  while (S.authed && S.poller === me) {
+    me.ctl = new AbortController();
     try {
-      const snap = await api("state?since=" + S.v);
+      const snap = await api("state?since=" + S.v, undefined, me.ctl);
+      if (S.poller !== me) break;
+      if (S.fails) { S.fails = 0; render(); }
       S.v = snap.v; S.snap = snap; await syncResults(); render();
     } catch (e) {
-      if (!S.authed) return;
-      setConn("off", "Q2 unreachable");
-      await new Promise(r => setTimeout(r, 3000));
+      if (!S.authed || S.poller !== me) break;
+      if (++S.fails === 3) toast("Can't reach the Q2. Is it on, awake and on this Wi-Fi?");
+      setConn(S.fails < 3 ? "wait" : "off", S.fails < 3 ? "Reconnecting…" : "Q2 unreachable");
+      $("#conn").title = S.fails < 3 ? "" : "Soulseek also stops by itself when idle on battery; Streaming → Soulseek on the Q2 starts it again.";
+      await new Promise(r => setTimeout(r, S.fails < 3 ? 1000 : 3000));
     }
   }
+  if (S.poller === me) S.poller = null;
 }
+function pausePoll() { const p = S.poller; S.poller = null; p?.ctl?.abort(); }
+document.addEventListener("visibilitychange", () => { if (document.hidden) pausePoll(); else poll(); });
+window.addEventListener("pageshow", () => poll());
+window.addEventListener("online", () => { pausePoll(); poll(); });
 
 function setConn(cls, text) { const c = $("#conn"); $(".dot", c).className = "dot " + cls; $("span:last-child", c).textContent = text; }
 
@@ -394,9 +424,14 @@ async function syncResults() {
   const s = list.find(s => s.id === S.current);
   if (!s) return;
   const have = S.results[s.id] || (S.results[s.id] = []);
-  if (s.results > have.length) {
-    try { const r = await api(`search?id=${s.id}&from=${have.length}`); have.push(...r.results); } catch (e) {}
-  }
+  try {
+    while (s.results > have.length) {
+      const r = await api(`search?id=${s.id}&from=${have.length}`);
+      if (!r.results.length) break;
+      for (const x of r.results) x.hay = (x.folder + "\\" + x.name).toLowerCase();
+      have.push(...r.results);
+    }
+  } catch (e) {}
 }
 
 // ---- Rendering ----
@@ -411,7 +446,7 @@ function draw() {
   const st = snap.status;
   const states = { online: ["on", "Online as " + st.username], connecting: ["wait", "Connecting…"], offline: ["off", "Offline"],
     refused: ["off", "Sign-in refused"], elsewhere: ["off", "Signed in elsewhere"], setup: ["wait", "Set up your account"], stopped: ["off", "Stopped"] };
-  setConn(...(states[st.state] || ["off", st.state]));
+  if (!S.fails) setConn(...(states[st.state] || ["off", st.state])), $("#conn").title = "";
   const p = $("#power");
   if (st.battery >= 0) { p.classList.remove("hidden"); p.innerHTML = (st.external_power ? ICON_BOLT : "") + `<span>${st.battery}%</span>`; p.title = st.external_power ? "On the cable" : "On battery"; }
   const dl = st.downloading + st.queued, up = st.uploading;
@@ -429,7 +464,7 @@ function quality(r) {
 }
 
 function passes(r, f, inc, exc) {
-  const hay = (r.folder + "\\" + r.name).toLowerCase();
+  const hay = r.hay;
   if (inc.length && !inc.every(w => hay.includes(w))) return false;
   if (exc.some(w => hay.includes(w))) return false;
   const e = r.ext;
@@ -442,20 +477,33 @@ function passes(r, f, inc, exc) {
   return true;
 }
 
-function drawSearch() {
+// The results, grouped by user and folder, up to S.rows file rows. Once those fill the screen, results
+// that come in later don't redraw it under the finger (or keep the phone busy): the pill counts them,
+// and a press, a filter or Show more brings them in.
+function drawSearch(force) {
   const snap = S.snap, list = snap.searches || [];
   $("#searchchips").innerHTML = list.map(s => `<span class="schip" aria-current="${s.id === S.current}" data-id="${s.id}">
     <span>${esc(s.query)}</span><span class="n">${s.results}</span><button class="x" data-close="${s.id}" aria-label="Close search">✕</button></span>`).join("");
-  const box = $("#results");
+  const box = $("#results"), pill = $("#fresh");
   const s = list.find(x => x.id === S.current);
   $("#filterwrap").classList.toggle("hidden", !s);
   if (!s) {
     const offline = snap.status.state !== "online";
+    pill.classList.add("hidden"); S.drawn = { key: "", n: 0, full: false };
     box.innerHTML = `<div class="empty">${ICON_EMPTY}${offline ? "Soulseek isn't connected yet." : "Search millions of shared files.<br>Results are grouped by user and folder, like Nicotine+."}</div>`;
     return;
   }
-  const f = S.filters, inc = f.in.toLowerCase().split(/\s+/).filter(Boolean), exc = f.out.toLowerCase().split(/\s+/).filter(Boolean);
-  const all = S.results[s.id] || [];
+  const f = S.filters, all = S.results[s.id] || [], age = Date.now() / 1000 - s.started;
+  const key = `${s.id}|${S.rows}|${JSON.stringify(f)}`;
+  const searching = age < 60 ? " · still searching…" : "";
+  if (!force && S.drawn.key === key && S.drawn.full) {
+    const more = all.length - S.drawn.n;
+    pill.textContent = `Show ${more} new result${more === 1 ? "" : "s"}`; pill.classList.toggle("hidden", more <= 0);
+    $("#rsummary").textContent = S.drawn.summary + searching;
+    return;
+  }
+  pill.classList.add("hidden");
+  const inc = f.in.toLowerCase().split(/\s+/).filter(Boolean), exc = f.out.toLowerCase().split(/\s+/).filter(Boolean);
   const users = new Map();
   let shownFiles = 0;
   for (const r of all) {
@@ -467,25 +515,30 @@ function drawSearch() {
     if (!fo) u.folders.set(r.folder, fo = []);
     fo.push(r); u.n++; u.size += r.size;
   }
-  const age = Date.now() / 1000 - s.started;
-  $("#rsummary").textContent = `${shownFiles} of ${all.length} files from ${users.size} of ${s.users} users${age < 60 ? " · still searching…" : ""}`;
+  const summary = `${shownFiles} of ${all.length} files from ${users.size} of ${s.users} users`;
+  $("#rsummary").textContent = summary + searching;
   const groups = [...users.values()];
   const by = { best: (a, b) => (b.free - a.free) || (b.speed - a.speed), speed: (a, b) => b.speed - a.speed, queue: (a, b) => a.queue - b.queue || b.speed - a.speed, size: (a, b) => b.size - a.size };
   groups.sort(by[f.sort] || by.best);
   if (!groups.length) {
+    S.drawn = { key, n: all.length, full: false, summary };
     box.innerHTML = `<div class="empty">${ICON_EMPTY}${all.length ? "No results match the filters." : age < 60 ? "Searching… results arrive over the next minute." : "Nothing found. Try fewer or other words."}</div>`;
     return;
   }
   const html = [];
-  for (const u of groups.slice(0, S.shown)) {
+  let rows = 0, left = 0;
+  for (const u of groups) {
+    if (rows >= S.rows) { left += u.n; continue; }
     html.push(`<div class="ugroup"><div class="uhead"><span class="name">${esc(u.user)}</span>
       ${u.free ? '<span class="pill free">Free slot</span>' : `<span class="pill q">Queue ${u.queue}</span>`}
       ${u.speed ? `<span class="pill">${fmtSpeed(u.speed)}</span>` : ""}<span class="pill">${u.n} file${u.n > 1 ? "s" : ""}</span></div>`);
     for (const [folder, files] of u.folders) {
+      if (rows >= S.rows) { left += files.length; continue; }
+      rows += files.length;
       const parts = folder.split("\\"), last = parts.pop();
       html.push(`<div class="folder"><div class="fhead"><span class="path">${esc(parts.slice(-2).join(" › "))}${parts.length ? " › " : ""}<b>${esc(last)}</b></span>
         <button class="btn slim" data-folder="${files[0].n}">Download folder</button></div>`);
-      files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+      files.sort((a, b) => byName(a.name, b.name));
       for (const r of files) {
         const q = quality(r), ll = LOSSLESS.has(r.ext);
         html.push(`<div class="file" data-n="${r.n}"><input type="checkbox" ${S.sel.has(r.n) ? "checked" : ""} aria-label="Select ${esc(r.name)}" tabindex="-1">
@@ -496,10 +549,13 @@ function drawSearch() {
     }
     html.push(`</div>`);
   }
-  if (groups.length > S.shown) html.push(`<button class="btn morebtn" id="moreusers">Show ${Math.min(40, groups.length - S.shown)} more users</button>`);
+  if (left) html.push(`<button class="btn morebtn" id="moreusers">Show more (${left} file${left === 1 ? "" : "s"} left)</button>`);
   box.innerHTML = html.join("");
+  S.drawn = { key, n: all.length, full: rows >= Math.min(S.rows, 40), summary };
   updateActionbar();
 }
+// redraw draws the results again with everything that has come in.
+function redraw() { if (S.tab === "search" && S.snap) drawSearch(true); }
 
 function updateActionbar() {
   const n = S.sel.size;
@@ -510,26 +566,27 @@ function updateActionbar() {
 $("#searchform").onsubmit = async e => {
   e.preventDefault();
   const q = $("#q").value.trim(); if (!q) return;
-  try { const r = await api("search", { query: q }); S.current = r.id; S.sel.clear(); S.shown = 40; $("#q").blur(); toast("Searching for “" + q + "”"); }
+  try { const r = await api("search", { query: q }); S.current = r.id; S.sel.clear(); S.rows = ROWS; $("#q").blur(); toast("Searching for “" + q + "”"); }
   catch (err) { toast(err.message); }
 };
 $("#searchchips").onclick = async e => {
   const x = e.target.closest("[data-close]");
   if (x) { const id = +x.dataset.close; await api("search/close", { id }).catch(() => {}); if (S.current === id) S.current = null; return; }
-  const c = e.target.closest(".schip"); if (c) { S.current = +c.dataset.id; S.sel.clear(); S.shown = 40; await syncResults(); render(); }
+  const c = e.target.closest(".schip"); if (c) { S.current = +c.dataset.id; S.sel.clear(); S.rows = ROWS; await syncResults(); render(); }
 };
 $("#results").onclick = async e => {
   const fb = e.target.closest("[data-folder]");
   if (fb) { try { await api("download/folder", { search: S.current, n: +fb.dataset.folder }); toast("Downloading the whole folder"); } catch (err) { toast(err.message); } return; }
-  if (e.target.id === "moreusers") { S.shown += 40; render(); return; }
+  if (e.target.id === "moreusers") { S.rows += ROWS; redraw(); return; }
   const row = e.target.closest(".file"); if (!row) return;
   const n = +row.dataset.n;
   S.sel.has(n) ? S.sel.delete(n) : S.sel.add(n);
   $("input", row).checked = S.sel.has(n); updateActionbar();
 };
-$("#selclear").onclick = () => { S.sel.clear(); render(); };
+$("#selclear").onclick = () => { S.sel.clear(); redraw(); updateActionbar(); };
+$("#fresh").onclick = () => { redraw(); };
 $("#seldl").onclick = async () => {
-  try { const r = await api("download", { search: S.current, n: [...S.sel] }); toast(`${r.queued} file${r.queued === 1 ? "" : "s"} added to Downloads`); S.sel.clear(); render(); }
+  try { const r = await api("download", { search: S.current, n: [...S.sel] }); toast(`${r.queued} file${r.queued === 1 ? "" : "s"} added to Downloads`); S.sel.clear(); redraw(); updateActionbar(); }
   catch (err) { toast(err.message); }
 };
 $("#filtertoggle").onclick = () => { const f = $("#filters"); f.classList.toggle("hidden"); $("#filtertoggle").setAttribute("aria-expanded", !f.classList.contains("hidden")); };

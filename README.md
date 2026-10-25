@@ -21,9 +21,9 @@ Open **Streaming → Soulseek** and press **Set up on your phone**: the Q2 shows
 
 ## Use
 
-**On the Q2:** Soulseek's page has **Phone Remote** (the QR code again), **Search**, **Downloads**, **Uploads**, **Sharing**, **Account** and **Stop Soulseek**. Search uses the Q2's keyboard; each result row is one audio file, with its user, format, size and whether a slot is free. Press a row to download the file; hold **Play/Pause** on it to download its whole folder. Downloads and uploads refresh every two seconds while their page is open, and a download's row offers pause, resume, retry and remove.
+**On the Q2:** Soulseek's page has **Phone Remote** (the QR code again), **Search**, **Downloads**, **Uploads**, **Sharing**, **Account** and **Stop Soulseek**. Search uses the Q2's keyboard and lists the folders (albums) its audio files are in, 50 a page with **More…** for the next, each with its user, number of files, format, size and whether a slot is free. The ones with a free slot and the fastest come first, and a folder keeps its place while results come in. Press a folder to see its files under **Download Folder**, and press a file to download it; hold **Play/Pause** on a folder or a file to download the whole folder. Downloads and uploads refresh every two seconds while their page is open, and a download's row offers pause, resume, retry and remove.
 
-**On your phone:** `http://<the Q2's address>:8080/` has **Search** (results grouped by user and folder, the fastest with a free slot first, filters for words, lossless, FLAC, MP3, bitrate and free slots; **Download folder** takes a whole album), **Downloads** (by album, with progress, speed and time left), **Uploads** and **Settings** (account, sharing, shared folders, upload slots and speed, the download folder, when to stop by itself, the listening port).
+**On your phone:** `http://<the Q2's address>:8080/` has **Search** (results grouped by user and folder, the fastest with a free slot first, filters for words, lossless, FLAC, MP3, bitrate and free slots; **Download folder** takes a whole album; the first 200 files show, **Show more** adds the next; once the screen is full, results that come in later wait behind **Show N new results**, so the list doesn't move under your finger), **Downloads** (by album, with progress, speed and time left), **Uploads** and **Settings** (account, sharing, shared folders, upload slots and speed, the download folder, when to stop by itself, the listening port).
 
 Finished downloads go to `Soulseek/<album folder>/` on the card; run **Library → Update Local Music** to play them. Unfinished ones wait in `Soulseek/.incomplete/` and carry on where they stopped, even after a restart.
 
@@ -34,6 +34,8 @@ Finished downloads go to `Soulseek/<album folder>/` on the card; run **Library �
 | **Off** (the default)                   | never: download only                                                    |
 | **Only while charging**                 | a cable powers the Q2 (Charge Limit holding the battery at 80% counts)  |
 | **While charging, or battery above N%** | as above, or on battery while it is at least N% (80 by default)         |
+
+The level is the one the Q2's status bar shows, and the phone page's top bar shows it too.
 
 Unplugged (or below the level), sharing stops at once and queued uploads wait for the next charge. By default the card's top-level folders are shared, except Photos, Books, Videos, EQ, Radio and the system folders, plus the download folder. Hidden files are never shared.
 

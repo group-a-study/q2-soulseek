@@ -15,6 +15,16 @@ import (
 	"github.com/group-a-study/q2-soulseek/internal/q2"
 )
 
+// TestMain sets the package-wide paths once: a stopped client's goroutines can outlive their test.
+func TestMain(m *testing.M) {
+	q2.Card = "/no-card" // the test's folders are not the card: no mount checks
+	power.Root, _ = os.MkdirTemp("", "q2-soulseek-power")
+	power.Gauge = filepath.Join(power.Root, "cw2015_capacity")
+	code := m.Run()
+	os.RemoveAll(power.Root)
+	os.Exit(code)
+}
+
 func setPower(t *testing.T, online bool, capacity int) {
 	t.Helper()
 	write := func(p, v string) {
@@ -80,8 +90,6 @@ func download(c *Client, id int) Info {
 }
 
 func TestSearchDownloadAndSharing(t *testing.T) {
-	q2.Card = "/no-card" // the test's folders are not the card: no mount checks
-	power.Root = t.TempDir()
 	setPower(t, true, 60)
 	srv, err := NewFakeServer("127.0.0.1:0")
 	if err != nil {
@@ -265,5 +273,85 @@ func TestSafeName(t *testing.T) {
 		if got := safeName(in); got != want {
 			t.Errorf("%q: %q, want %q", in, got, want)
 		}
+	}
+}
+
+// response is a user's answer to search token: n files (and priv private ones), each a FLAC with its
+// rate and depth, compressed as servePeer hands it over.
+func response(user string, token uint32, n, priv int, free bool, speed, queue uint32) *reader {
+	list := func(k int, tag string) []File {
+		files := make([]File, k)
+		for i := range files {
+			files[i] = File{Name: `@@music\` + user + `\Album ` + itoa(i/12) + `\` + tag + itoa(i) + ".flac", Size: uint64(i + 1),
+				Ext: "flac", Attrs: []Attr{{attrSampleRate, 96000}, {attrBitDepth, 24}}}
+		}
+		return files
+	}
+	m := (&msg{}).str(user).u32(token)
+	writeFiles(m, list(n, "song "))
+	m.boolean(free).u32(speed).u32(queue).u32(0)
+	writeFiles(m, list(priv, "private "))
+	return &reader{b: compress(m.b)}
+}
+
+// A search keeps maxUserResults files a user and maxSearchResults in all, reading each answer as
+// it inflates; what follows a user's long list (the free slot, speed, queue, private files) still
+// reads right after the files it steps over.
+func TestSearchResponseLimits(t *testing.T) {
+	c := New(Config{}, t.TempDir())
+	c.searches = []*Search{{Token: 7, Query: "x", Started: time.Now(), users: map[string]bool{}}}
+	c.searchResponse("long", response("long", 7, 1000, 5, true, 5000, 0))
+	_, res, _ := c.Results(7, 0)
+	if len(res) != maxUserResults || res[0].Name != "song 0.flac" || res[0].Rate != 96000 || res[0].Depth != 24 ||
+		!res[0].Free || res[0].Speed != 5000 || res[149].Name != "song 149.flac" || res[149].Size != 150 {
+		t.Fatalf("a long answer: %d, %+v ... %+v", len(res), res[0], res[len(res)-1])
+	}
+	c.searchResponse("long", response("long", 7, 10, 0, true, 1, 0)) // a second answer from the same user
+	c.searchResponse("x", response("short", 8, 10, 0, true, 1, 0))   // a search we don't have
+	c.searchResponse("few", response("few", 7, 3, 2, false, 300, 4))
+	_, res, _ = c.Results(7, 0)
+	if len(res) != maxUserResults+5 {
+		t.Fatalf("%d results", len(res))
+	}
+	if r := res[maxUserResults+3]; r.User != "few" || r.Name != "private 0.flac" || !r.Private || r.Free || r.Queue != 4 || r.Speed != 300 {
+		t.Fatalf("a private file %+v", r)
+	}
+	for i := 0; len(res) < maxSearchResults && i < 40; i++ {
+		c.searchResponse("", response("u"+itoa(i), 7, 1000, 0, true, 1, 0))
+		_, res, _ = c.Results(7, 0)
+	}
+	if len(res) != maxSearchResults || c.room(7, "late") != 0 {
+		t.Fatalf("a full search: %d", len(res))
+	}
+	c.searchResponse("late", response("late", 7, 10, 0, true, 1, 0))
+	c.CloseSearch(7)
+	c.searchResponse("closed", response("closed", 7, 10, 0, true, 1, 0))
+	if _, res, _ = c.Results(7, 0); res != nil {
+		t.Fatal("a closed search kept results")
+	}
+}
+
+// A new battery level or cable is a change the phone hears of, as sharing starting is.
+func TestPowerChange(t *testing.T) {
+	setPower(t, false, 60)
+	t.Cleanup(func() { os.Remove(power.Gauge) })
+	c := New(Config{}, t.TempDir())
+	c.updateSharing()
+	ch := c.Changed()
+	c.updateSharing()
+	select {
+	case <-ch:
+		t.Fatal("a change without one")
+	default:
+	}
+	os.WriteFile(power.Gauge, []byte("59\n"), 0o644)
+	c.updateSharing()
+	select {
+	case <-ch:
+	default:
+		t.Fatal("no change for a new level")
+	}
+	if st := c.Status(); st.Battery != 59 || st.External {
+		t.Fatalf("status %+v", st)
 	}
 }

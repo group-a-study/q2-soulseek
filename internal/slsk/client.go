@@ -131,29 +131,31 @@ type Client struct {
 	dirty        bool // downloads to save
 	lastActivity time.Time
 
-	answers chan struct{} // search answers being sent, at most its capacity at once
-	changed chan struct{}
-	stop    chan struct{}
-	stopped bool
+	answers   chan struct{} // search answers being sent, at most its capacity at once
+	inflating chan struct{} // search responses being read, at most its capacity at once
+	changed   chan struct{}
+	stop      chan struct{}
+	stopped   bool
 }
 
 // New makes a client for cfg, keeping its files in dir. Nothing connects before Start.
 func New(cfg Config, dir string) *Client {
 	c := &Client{
-		dir:      dir,
-		cfg:      cfg,
-		state:    StateSetup,
-		pierce:   map[uint32]*pending{},
-		addrs:    map[string][]chan peerAddr{},
-		peers:    map[string]*conn{},
-		dialing:  map[string]chan struct{}{},
-		upTokens: map[uint32]*Transfer{},
-		folders:  map[uint32]chan map[string][]File{},
-		token:    rand.Uint32() >> 1,
-		answers:  make(chan struct{}, 6),
-		changed:  make(chan struct{}),
-		stop:     make(chan struct{}),
-		bucket:   newBucket(),
+		dir:       dir,
+		cfg:       cfg,
+		state:     StateSetup,
+		pierce:    map[uint32]*pending{},
+		addrs:     map[string][]chan peerAddr{},
+		peers:     map[string]*conn{},
+		dialing:   map[string]chan struct{}{},
+		upTokens:  map[uint32]*Transfer{},
+		folders:   map[uint32]chan map[string][]File{},
+		token:     rand.Uint32() >> 1,
+		answers:   make(chan struct{}, 6),
+		inflating: make(chan struct{}, 2),
+		changed:   make(chan struct{}),
+		stop:      make(chan struct{}),
+		bucket:    newBucket(),
 	}
 	os.MkdirAll(dir, 0o755)
 	c.loadDownloads()
