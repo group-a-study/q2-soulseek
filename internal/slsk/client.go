@@ -390,17 +390,26 @@ func (c *Client) listen(port int) {
 	log.Printf("no port to listen on from %d", port)
 }
 
+// acceptLoop takes other users' connections until l closes. A failed accept (too many open files,
+// as hundreds of users answer a popular search) waits and tries again, as net/http does; giving
+// up would leave the port open but deaf for the rest of the session.
 func (c *Client) acceptLoop(l net.Listener) {
+	wait := 5 * time.Millisecond
 	for {
 		nc, err := l.Accept()
-		if err != nil {
-			var ne net.Error
-			if errors.As(err, &ne) && ne.Timeout() {
-				continue
-			}
+		if err == nil {
+			wait = 5 * time.Millisecond
+			go c.incoming(nc)
+			continue
+		}
+		if errors.Is(err, net.ErrClosed) {
 			return
 		}
-		go c.incoming(nc)
+		if wait == 5*time.Millisecond {
+			log.Printf("peer accept: %v", err)
+		}
+		time.Sleep(wait)
+		wait = min(2*wait, time.Second)
 	}
 }
 

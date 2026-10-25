@@ -1,9 +1,12 @@
 package q2spot
 
 import (
+	"io"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -69,9 +72,11 @@ func TestEncodeLimits(t *testing.T) {
 
 func TestServe(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.sock")
+	stop := make(chan struct{})
+	defer close(stop)
 	go Serve(path, func(r Request) Reply {
 		return Reply{Message: r.Op, Rows: []Row{{Kind: "info", Title: r.Arg(0)}}}
-	})
+	}, stop)
 	var c net.Conn
 	var err error
 	for i := 0; i < 100; i++ {
@@ -90,4 +95,53 @@ func TestServe(t *testing.T) {
 	if got := string(buf[:n]); got != "Q2SPOT/1\n9\tok\tmenu\t\ninfo\t\tA%25\t\t\t\n" {
 		t.Fatalf("%q", got)
 	}
+}
+
+// The socket outlives what used to end it, which the Q2 showed as "isn't running" while the phone
+// page still worked: running out of open files for a moment (a popular search's peers), and its
+// file going.
+func TestServeRecovers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.sock")
+	stop := make(chan struct{})
+	defer close(stop)
+	go Serve(path, func(r Request) Reply { return Reply{Message: r.Op} }, stop)
+	ask := func() bool {
+		c, err := net.Dial("unix", path)
+		if err != nil {
+			return false
+		}
+		defer c.Close()
+		c.Write([]byte("Q2SPOT/1\n1\tmenu\n"))
+		c.(*net.UnixConn).CloseWrite()
+		c.SetDeadline(time.Now().Add(time.Second))
+		b, _ := io.ReadAll(c)
+		return strings.HasPrefix(string(b), "Q2SPOT/1\n1\tok\tmenu")
+	}
+	answers := func(what string) {
+		t.Helper()
+		for end := time.Now().Add(5 * time.Second); !ask(); time.Sleep(50 * time.Millisecond) {
+			if time.Now().After(end) {
+				t.Fatalf("no answer %s", what)
+			}
+		}
+	}
+	answers("at first")
+
+	var lim syscall.Rlimit
+	syscall.Getrlimit(syscall.RLIMIT_NOFILE, &lim)
+	syscall.Setrlimit(syscall.RLIMIT_NOFILE, &syscall.Rlimit{Cur: 64, Max: lim.Max})
+	var hog []*os.File
+	for f, err := os.Open(os.DevNull); err == nil; f, err = os.Open(os.DevNull) {
+		hog = append(hog, f)
+	}
+	hog[len(hog)-1].Close() // the client's connect takes it, so the server's accept fails
+	ask()
+	for _, f := range hog[:len(hog)-1] {
+		f.Close()
+	}
+	syscall.Setrlimit(syscall.RLIMIT_NOFILE, &lim)
+	answers("once files are free again")
+
+	os.Remove(path)
+	answers("after its file went")
 }

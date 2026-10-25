@@ -48,7 +48,9 @@ running. The launcher copies q2-soulseek and itself to /tmp and leaves the card 
 restarts it after a crash, waiting 5 s and doubling to a minute, and leaves its pid in
 /tmp/q2-soulseek. An exit of 0 (stopped from the Q2 or the phone, or idle) ends the loop. A TERM to
 it stops q2-soulseek cleanly, its downloads saved: Q2 Pod sends it for Stop Streaming Services,
-Home's Rockbox row, an Apps update or remove, and USB storage (after which it starts it again).
+Home's Rockbox row, an Apps update or remove, and USB storage (after which it starts it again). A
+stop always stops: q2-soulseek exits 10 s after it begins one however far its tidy one got, and the
+loop kills an app still there 15 s after its TERM.
 Downloads are written to the card in 512 KB chunks, each file opened and closed around its write,
 and shared files are read the same way, so the card is almost never busy. Its log is
 /tmp/q2-soulseek.log.
@@ -66,7 +68,9 @@ and shared files are read the same way, so the card is almost never busy. Its lo
   /tmp/q2-soulseek.sock
       the datagram q stops it
   /tmp/q2-soulseek.browse.sock
-      Q2SPOT/1 (q2-pod's docs/librespot.md) for the Q2's page, below
+      Q2SPOT/1 (q2-pod's docs/librespot.md) for the Q2's page, below. The Q2 takes a socket that
+      refuses it for an app that isn't running, so this one is kept: an accept that fails (too many
+      open files) is tried again, and the socket is made again if its file goes
   port 8080 (the next free one if taken)
       the phone page. The QR code carries a key that signs the browser in; typed by hand, the page
       asks for the PIN on the Q2's screen. Ten wrong PINs lock it for a minute. Settings -> On the
@@ -80,7 +84,9 @@ Network: the Soulseek server is server.slsknet.org:2242; the app logs in as an e
 you indirectly through the server as long as their own port is open; forwarding it brings more
 results and faster connections. A search keeps 150 files from each user and 3000 in all, so a
 popular one reaches at least 20 users; answers are read as they inflate, two at a time, and only
-the files kept are held, so hundreds of users answering at once fit in the Q2's memory. While
+the files kept are held, so hundreds of users answering at once fit in the Q2's memory. A
+connection that only brought results is closed once they are read, unless a transfer or a folder
+asked for needs it, so they don't use up the files the app may have open. While
 sharing is on, the Q2 answers other users' searches, joins
 the distributed search network as a leaf (it takes no children), and sends files from the shared
 folders, upload_slots (2) at a time.

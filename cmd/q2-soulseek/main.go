@@ -27,7 +27,7 @@ import (
 	"github.com/group-a-study/q2-soulseek/internal/slsk"
 )
 
-const version = "q2-v1.2"
+const version = "q2-v1.3"
 
 // settings is .soulseek/config.json: the client's configuration, the phone's key and PIN, and when
 // to stop by itself.
@@ -91,6 +91,12 @@ func main() {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	go func() { <-sig; a.shutdown() }()
+	go func() { // a stop always stops, even if the tidy one hangs
+		<-a.quit
+		time.Sleep(10 * time.Second)
+		log.Printf("stopping took over 10 s: exiting")
+		os.Exit(0)
+	}()
 	a.run()
 	os.Exit(0)
 }
@@ -111,7 +117,7 @@ func start(o options) (*app, error) {
 	a.port, a.web = port, l
 	go serveWeb(a, l)
 	go func() {
-		if err := q2spot.Serve(o.browse, a.device); err != nil {
+		if err := q2spot.Serve(o.browse, a.device, a.quit); err != nil {
 			log.Printf("browse socket: %v", err)
 		}
 	}()

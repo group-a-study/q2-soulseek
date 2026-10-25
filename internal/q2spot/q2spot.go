@@ -5,6 +5,8 @@ package q2spot
 
 import (
 	"errors"
+	"fmt"
+	"log"
 	"net"
 	"os"
 	"strings"
@@ -183,26 +185,95 @@ func (r Reply) Encode(id string) ([]byte, int) {
 // Handler answers one request.
 type Handler func(Request) Reply
 
-// Serve answers requests on a Unix stream socket at path until the listener fails. A stale socket
-// file is replaced; the socket is made writable by everyone, as demo runs as root anyway.
-func Serve(path string, h Handler) error {
-	os.Remove(path)
-	l, err := net.Listen("unix", path)
+// Serve answers requests on a Unix stream socket at path until stop closes; a stale socket file is
+// replaced (demo runs as root, so its mode doesn't matter). The Q2's page
+// takes a socket that refuses it for an app that isn't running, so the socket outlives what would
+// end it: an accept that fails (too many open files, during a popular search) is tried again, and
+// the socket is made again if accepting gives up or its file goes. The error is the first listen's.
+func Serve(path string, h Handler, stop <-chan struct{}) error {
+	l, id, err := listen(path)
 	if err != nil {
 		return err
 	}
-	defer l.Close()
+	tick := time.NewTicker(2 * time.Second)
+	defer tick.Stop()
+	for {
+		done := make(chan struct{})
+		go func() { acceptAll(l, h); close(done) }()
+		for gone := false; !gone; {
+			select {
+			case <-stop:
+				l.Close()
+				<-done
+				return nil
+			case <-done:
+				gone = true
+			case <-tick.C:
+				fi, err := os.Stat(path)
+				gone = err != nil || !os.SameFile(fi, id)
+			}
+		}
+		l.Close()
+		<-done
+		log.Printf("q2spot: %s gone; listening again", path)
+		for {
+			if l, id, err = listen(path); err == nil {
+				break
+			}
+			select {
+			case <-stop:
+				return nil
+			case <-tick.C:
+			}
+		}
+	}
+}
+
+func listen(path string) (net.Listener, os.FileInfo, error) {
+	os.Remove(path)
+	l, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, nil, err
+	}
+	id, err := os.Stat(path)
+	if err != nil {
+		l.Close()
+		return nil, nil, err
+	}
+	return l, id, nil
+}
+
+// acceptAll answers each connection on l until l closes, or accepting has failed for 10 s.
+func acceptAll(l net.Listener, h Handler) {
+	var since time.Time
+	wait := 5 * time.Millisecond
 	for {
 		c, err := l.Accept()
-		if err != nil {
-			var ne net.Error
-			if errors.As(err, &ne) && ne.Timeout() {
-				continue
-			}
-			return err
+		if err == nil {
+			since, wait = time.Time{}, 5*time.Millisecond
+			go answer(c, h)
+			continue
 		}
-		go answer(c, h)
+		if errors.Is(err, net.ErrClosed) {
+			return
+		}
+		if since.IsZero() {
+			since = time.Now()
+			log.Printf("q2spot: accept: %v%s", err, openFiles())
+		} else if time.Since(since) > 10*time.Second {
+			return
+		}
+		time.Sleep(wait)
+		wait = min(2*wait, time.Second)
 	}
+}
+
+// openFiles says how many files the process has open, when it can tell.
+func openFiles() string {
+	if fds, err := os.ReadDir("/proc/self/fd"); err == nil {
+		return fmt.Sprintf(" (%d files open)", len(fds))
+	}
+	return ""
 }
 
 func answer(c net.Conn, h Handler) {

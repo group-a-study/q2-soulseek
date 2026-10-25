@@ -135,6 +135,12 @@ func TestSearchDownloadAndSharing(t *testing.T) {
 	if r := res[0]; r.Duration != 180 || r.Rate != 44100 || r.Depth != 16 || !r.Free || r.Ext != "flac" {
 		t.Fatalf("attributes %+v", r)
 	}
+	// With no transfer between them, bob's connection that brought the results is let go.
+	waitFor(t, "bob's connection closed", 5*time.Second, func() bool {
+		alice.mu.Lock()
+		defer alice.mu.Unlock()
+		return alice.peers["bob"] == nil
+	})
 	tok, _ = alice.Search("ready lets")
 	waitFor(t, "the other result", 10*time.Second, func() bool { _, res, _ = alice.Results(tok, 0); return len(res) == 1 })
 

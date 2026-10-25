@@ -327,9 +327,33 @@ func (c *Client) servePeer(p *conn) {
 			return
 		}
 		if len(body) >= 4 {
-			c.peerMessage(p, binary.LittleEndian.Uint32(body), &reader{b: body[4:]})
+			code := binary.LittleEndian.Uint32(body)
+			c.peerMessage(p, code, &reader{b: body[4:]})
+			// One that only brought search results is let go at once: a popular search brings
+			// hundreds, and the Q2 has few files to keep open.
+			if code == pSearchResponse && !c.dealing(p.user) {
+				return
+			}
 		}
 	}
+}
+
+// dealing is whether we have business with user that its P connection may carry: a transfer under
+// way or waiting, or a folder asked for.
+func (c *Client) dealing(user string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.folders) > 0 {
+		return true
+	}
+	for _, l := range [][]*Transfer{c.downs, c.ups} {
+		for _, t := range l {
+			if t.User == user && t.State != Finished && t.State != Failed {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (c *Client) peerMessage(p *conn, code uint32, r *reader) {
